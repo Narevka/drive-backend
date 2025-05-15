@@ -479,9 +479,9 @@ try {
 }
 
 // Funkcja do wysyłania pliku do analizy przez FlowiseAI
-async function sendFileToFlowiseAI(filePath) {
+async function sendFileToFlowiseAI(filePath, flowId, question = "Przeanalizuj ten dokument i zwróć informacje o języku, typie dokumentu i danych osobowych.") {
   try {
-    console.log('[DEBUG] Wysyłanie pliku do analizy FlowiseAI:', filePath);
+    console.log(`[DEBUG] Wysyłanie pliku do analizy FlowiseAI (Flow ID: ${flowId}):`, filePath);
     
     // Przygotuj dane pliku
     const fileBuffer = fs.readFileSync(filePath);
@@ -497,7 +497,7 @@ async function sendFileToFlowiseAI(filePath) {
     
     // Przygotowanie prawidłowego formatu JSON dla FlowiseAI
     const requestData = {
-      question: "Przeanalizuj ten dokument i zwróć informacje o języku, typie dokumentu i danych osobowych.",
+      question: question,
       uploads: [
         {
           data: dataUri,
@@ -508,11 +508,8 @@ async function sendFileToFlowiseAI(filePath) {
       ]
     };
     
-    // URL FlowiseAI API
-    // Produkcyjny adres API FlowiseAI
-    const apiUrl = 'https://cloud.flowiseai.com/api/v1/prediction/bc4f5360-98e2-4ce9-841d-c44812f5d850';
-    // Lokalny adres (tylko do testów)
-    // const apiUrl = 'http://localhost:3000/api/v1/prediction/bc4f5360-98e2-4ce9-841d-c44812f5d850';
+    // URL FlowiseAI API dynamicznie na podstawie flowId
+    const apiUrl = `https://cloud.flowiseai.com/api/v1/prediction/${flowId}`;
     
     console.log(`[DEBUG] Wywołanie API FlowiseAI: ${apiUrl}`);
     console.log(`[DEBUG] Format zapytania: ${JSON.stringify({
@@ -560,6 +557,99 @@ async function sendFileToFlowiseAI(filePath) {
   }
 }
 
+// Nowa funkcja do przetwarzania dokumentu przez dwa API FlowiseAI
+async function processDocumentWithFlowiseAI(filePath) {
+  try {
+    console.log('[DEBUG] Rozpoczynam wieloetapową analizę dokumentu');
+    
+    // ID przepływu dla klasyfikatora dokumentów
+    const classifierFlowId = 'bc4f5360-98e2-4ce9-841d-c44812f5d850';
+    
+    // Krok 1: Najpierw analizujemy typ dokumentu
+    console.log('[DEBUG] Krok 1: Klasyfikacja dokumentu');
+    const classificationResult = await sendFileToFlowiseAI(
+      filePath, 
+      classifierFlowId,
+      "Przeanalizuj ten dokument i określ jego typ"
+    );
+    
+    console.log('[DEBUG] Wynik klasyfikacji:', JSON.stringify(classificationResult).substring(0, 200));
+    
+    // Próbujemy sparsować odpowiedź JSON, jeśli jest w formacie tekstowym
+    let documentType = 'unknown';
+    let resultObj = null;
+    
+    try {
+      // Próbujemy sparsować obiekt JSON z pola text
+      if (classificationResult.text) {
+        resultObj = JSON.parse(classificationResult.text);
+        
+        // Sprawdzamy typ dokumentu na podstawie wartości true
+        if (resultObj.akt_urodzenia === true) {
+          documentType = 'akt_urodzenia';
+        } else if (resultObj.akt_malzenstwa === true) {
+          documentType = 'akt_malzenstwa';
+        } else if (resultObj.akt_zgonu === true) {
+          documentType = 'akt_zgonu';
+        } else {
+          documentType = 'unknown';
+        }
+      }
+    } catch (parseError) {
+      console.error('[ERROR] Nie udało się sparsować odpowiedzi JSON:', parseError);
+      // Jeśli parsowanie się nie uda, ustawiamy typ dokumentu na unknown
+      documentType = 'unknown';
+    }
+    
+    console.log(`[DEBUG] Wykryty typ dokumentu: ${documentType}`);
+    
+    // Krok 2: Wybór API na podstawie typu dokumentu
+    let detailedResult = null;
+    
+    if (documentType !== 'unknown') {
+      // Mapowanie typów dokumentów na ID przepływów 
+      const flowIdMap = {
+        'akt_urodzenia': '8ea8fdf4-a3d4-4d0a-a6bd-ee91c55ef9df',
+        'akt_malzenstwa': 'ID_DO_UZUPEŁNIENIA', // TODO: Uzupełnić prawidłowe ID
+        'akt_zgonu': 'ID_DO_UZUPEŁNIENIA'       // TODO: Uzupełnić prawidłowe ID
+      };
+      
+      const detailedFlowId = flowIdMap[documentType];
+      
+      if (detailedFlowId) {
+        console.log(`[DEBUG] Krok 2: Szczegółowa analiza dokumentu typu '${documentType}' używając flow ID: ${detailedFlowId}`);
+        
+        try {
+          detailedResult = await sendFileToFlowiseAI(
+            filePath, 
+            detailedFlowId,
+            `Przeanalizuj szczegółowo ten ${documentType} i wyodrębnij wszystkie dane`
+          );
+          
+          console.log('[DEBUG] Otrzymano szczegółową analizę dokumentu');
+        } catch (detailError) {
+          console.error('[ERROR] Błąd podczas szczegółowej analizy:', detailError);
+          // Jeśli szczegółowa analiza się nie powiedzie, zwróć tylko klasyfikację
+        }
+      } else {
+        console.log(`[WARNING] Brak skonfigurowanego FlowId dla typu dokumentu '${documentType}'`);
+      }
+    } else {
+      console.log('[WARNING] Nie rozpoznano typu dokumentu, pomijam szczegółową analizę');
+    }
+    
+    // Zwróć wyniki z obu API
+    return {
+      api1Result: classificationResult,
+      api2Result: detailedResult,
+      documentType: documentType
+    };
+  } catch (error) {
+    console.error('[ERROR] Błąd podczas wieloetapowej analizy dokumentu:', error);
+    throw error;
+  }
+}
+
 // Endpoint do analizy dokumentu przez FlowiseAI
 app.post('/flowwise-analyze', upload.single('file'), async (req, res) => {
   try {
@@ -574,18 +664,20 @@ app.post('/flowwise-analyze', upload.single('file'), async (req, res) => {
     console.log('[INFO] Analizowanie pliku:', req.file.originalname);
     
     try {
-      // Wywołanie API FlowiseAI
-      const apiResponse = await sendFileToFlowiseAI(req.file.path);
+      // Wywołanie wieloetapowej analizy
+      const analysisResults = await processDocumentWithFlowiseAI(req.file.path);
       
       // Usuń plik tymczasowy
       if (req.file && req.file.path && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
       
-      // Zwróć wynik analizy
+      // Zwróć wyniki obu API
       res.status(200).json({
         success: true,
-        api_response: apiResponse,
+        classification: analysisResults.api1Result,
+        details: analysisResults.api2Result,
+        documentType: analysisResults.documentType,
         file_info: {
           name: req.file.originalname,
           size: req.file.size,
