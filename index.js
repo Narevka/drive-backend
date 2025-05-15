@@ -9,6 +9,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const FormData = require('form-data');
 const mime = require('mime-types');
+const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, BorderStyle } = require('docx');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 // Konfiguracja aplikacji Express
@@ -708,31 +709,143 @@ app.post('/flowwise-analyze', upload.single('file'), async (req, res) => {
   }
 });
 
-// Funkcja do tworzenia i uzupełniania dokumentu Google Docs na podstawie danych
+// Funkcja do tworzenia dokumentu DOCX na podstawie danych
+async function createDocxTranslation(docData, outputPath) {
+  try {
+    console.log('[DEBUG] Generowanie dokumentu DOCX z danymi');
+    
+    // Utwórz nowy dokument
+    const doc = new Document({
+      styles: {
+        paragraphStyles: [
+          {
+            id: "Heading1",
+            name: "Heading 1",
+            basedOn: "Normal",
+            next: "Normal",
+            quickFormat: true,
+            run: {
+              size: 28,
+              bold: true,
+            },
+            paragraph: {
+              spacing: {
+                after: 120,
+              },
+            },
+          },
+          {
+            id: "Heading2",
+            name: "Heading 2",
+            basedOn: "Normal",
+            next: "Normal",
+            quickFormat: true,
+            run: {
+              size: 26,
+              bold: true,
+            },
+            paragraph: {
+              spacing: {
+                before: 240,
+                after: 120,
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    // Funkcja pomocnicza do tworzenia paragrafów
+    const addParagraph = (text, options = {}) => {
+      let paragraph = new Paragraph({
+        alignment: options.alignment || AlignmentType.LEFT,
+        spacing: { before: options.spacingBefore || 0, after: options.spacingAfter || 200 },
+        ...options
+      });
+      
+      paragraph.addRun(new TextRun({
+        text: text,
+        bold: options.bold || false,
+        italics: options.italics || false,
+        size: options.size || 24,
+      }));
+      
+      doc.addParagraph(paragraph);
+    };
+
+    // Dodaj tytuł dokumentu
+    addParagraph("TŁUMACZENIE UWIERZYTELNIONE Z JĘZYKA UKRAIŃSKIEGO", {
+      alignment: AlignmentType.CENTER,
+      bold: true,
+      size: 28,
+      spacingAfter: 400
+    });
+
+    // Dodaj informacje o dokumencie
+    addParagraph("[Uwagi tłumacza oznaczono kursywą w nawiasie kwadratowym.]", { italics: true });
+    addParagraph("[Dokument w postaci jednostronicowego druku urzędowego z godłem państwowym Ukrainy. Pisownia imion i nazwisk zgodna z ukraińską oficjalną transliteracją na litery alfabetu łacińskiego]", { italics: true, spacingAfter: 400 });
+
+    // Dodaj nagłówek UKRAINA
+    addParagraph(`UKRAINA ${docData["UKRAINA -/- "] || '-/-'}`, { bold: true, alignment: AlignmentType.CENTER, spacingAfter: 400 });
+
+    // Dodaj nagłówek AKT URODZENIA
+    addParagraph("AKT URODZENIA", { bold: true, alignment: AlignmentType.CENTER, spacingAfter: 400 });
+
+    // Dodaj dane osobowe
+    addParagraph(`Nazwisko: ${docData["Naziwsko"] || '-/-'}`);
+    addParagraph(`Imię: ${docData["3. Imie"] || '-/-'}`);
+    addParagraph(`Imię odojcowskie: ${docData["4. imie ojcowskie"] || '-/-'}`);
+    addParagraph(`roku (słownie: ) ${docData["5. roku (slownie)"] || '-/-'}`);
+    addParagraph(`miejsce urodzenia: Ukraina, obwód zaporoski, ${docData["6. miejsce urodzenia: Ukraina, obwód zaporoski,  "] || '-/-'}`);
+    addParagraph(`o czym w Księdze Rejestracji Urodzeń w dniu roku dokonano odpowiedniego wpisu do akt pod nr ${docData["7. o czym w Księdze Rejestracji Urodzeń w dniu  roku dokonano odpowiedniego wpisu do akt pod nr  "] || '-/-'}`);
+
+    // Dodaj nagłówek RODZICE
+    addParagraph("RODZICE", { bold: true, alignment: AlignmentType.CENTER, spacingBefore: 400, spacingAfter: 400 });
+
+    // Dodaj dane rodziców
+    addParagraph(`Ojciec: , syn ${docData["8. Ojciec: , syn  "] || '-/-'}`);
+    addParagraph(`Obywatelstwo: ${docData["9. Obywatelstwo"] || '-/-'}`);
+    addParagraph(`Matka: , córka ${docData["10. Matka: , córka "] || '-/-'}`);
+    addParagraph(`Obywatelstwo: ${docData["11. Obywatelstwo:  "] || '-/-'}`);
+
+    // Dodaj pozostałe informacje
+    addParagraph(`Miejsce rejestracji: (nazwa i siedziba państwowego USC) ${docData["12. Miejsce rejestracji: (nazwa i siedziba państwowego USC)  "] || '-/-'}`);
+    addParagraph(`Organ państwowy wydający akt: (nazwa i siedziba państwowego USC) ${docData["13. Organ państwowy wydający akt: (nazwa i siedziba państwowego USC)  "] || '-/-'}`);
+    addParagraph(`Data wydania: roku. ${docData["14. Data wydania:  roku. "] || '-/-'}`);
+    addParagraph(`[Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:] ${docData["15. [Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:]"] || '-/-'}`, { italics: true });
+    addParagraph(`Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ${docData["16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony]  "] || '-/-'}`);
+    addParagraph(`[Seria i numer dokumentu:] [ - zapis oryginalny] nr ${docData["17. [Seria i numer dokumentu:]  [  - zapis oryginalny] nr  "] || '-/-'}`, { italics: true });
+
+    // Dodaj linię rozdzielającą
+    addParagraph("=========================================================================", {
+      alignment: AlignmentType.CENTER,
+      spacingBefore: 400,
+      spacingAfter: 400
+    });
+
+    // Dodaj poświadczenie tłumacza
+    addParagraph("Ja, Ołena Sawenko, tłumacz przysięgły języka ukraińskiego, wpisany na listę tłumaczy przysięgłych Ministerstwa Sprawiedliwości RP, pod numerem TP/3/16, niniejszym poświadczam zgodność powyższego tłumaczenia z oryginałem dokumentu w języku ukraińskim.");
+    addParagraph("Numer w repertorium: .");
+    addParagraph(`Warszawa, ${new Date().toLocaleDateString('pl-PL')} roku.`, { spacingBefore: 400 });
+
+    // Zapisz dokument
+    const buffer = await Packer.toBuffer(doc);
+    fs.writeFileSync(outputPath, buffer);
+    console.log('[DEBUG] Dokument DOCX został wygenerowany i zapisany:', outputPath);
+    
+    return outputPath;
+  } catch (error) {
+    console.error('[ERROR] Błąd podczas generowania dokumentu DOCX:', error);
+    throw error;
+  }
+}
+
+// Funkcja do tworzenia i wysyłania dokumentu z danymi
 async function createAndFillGoogleDoc(drive, folderName, folderId, documentData) {
   try {
-    console.log('[DEBUG] Tworzenie dokumentu Google Docs z danymi dla folderu:', folderName);
+    console.log('[DEBUG] Tworzenie dokumentu DOCX z danymi dla folderu:', folderName);
     
-    // Nazwa dokumentu
-    const docName = `Tłumaczenie - ${folderName}`;
-    
-    // Przygotowanie metadanych dla dokumentu
-    const fileMetadata = {
-      name: docName,
-      mimeType: 'application/vnd.google-apps.document',
-      parents: [folderId], // Umieść dokument w określonym folderze
-    };
-    
-    // Tworzenie pustego dokumentu
-    const res = await drive.files.create({
-      resource: fileMetadata,
-      fields: 'id,name,webViewLink',
-    });
-    
-    const docId = res.data.id;
-    console.log(`[INFO] Utworzono pusty dokument Google Docs: ${docName} (${docId})`);
-    
-    // Próbujemy sparsować dane dokumentu
+    // Sparsuj dane dokumentu
     let docData = {};
     try {
       if (typeof documentData.details?.text === 'string') {
@@ -744,74 +857,53 @@ async function createAndFillGoogleDoc(drive, folderName, folderId, documentData)
       console.error('[ERROR] Nie udało się sparsować danych dokumentu:', parseError);
     }
     
-    // Szablon dokumentu tłumaczenia
-    const docContent = `TŁUMACZENIE UWIERZYTELNIONE Z JĘZYKA UKRAIŃSKIEGO 
-[Uwagi tłumacza oznaczono kursywą w nawiasie kwadratowym.]
-[Dokument w postaci jednostronicowego druku urzędowego z godłem państwowym Ukrainy. Pisownia imion i nazwisk zgodna z ukraińską oficjalną transliteracją na litery alfabetu łacińskiego]
-
-UKRAINA ${docData["UKRAINA -/- "] || '-/-'}
-
-AKT URODZENIA
-
-Nazwisko: ${docData["Naziwsko"] || '-/-'}
-
-Imię: ${docData["3. Imie"] || '-/-'}
-
-Imię odojcowskie: ${docData["4. imie ojcowskie"] || '-/-'}
-
-roku (słownie: ) ${docData["5. roku (slownie)"] || '-/-'}
-
-miejsce urodzenia: Ukraina, obwód zaporoski, ${docData["6. miejsce urodzenia: Ukraina, obwód zaporoski,  "] || '-/-'}
-
-o czym w Księdze Rejestracji Urodzeń w dniu roku dokonano odpowiedniego wpisu do akt pod nr ${docData["7. o czym w Księdze Rejestracji Urodzeń w dniu  roku dokonano odpowiedniego wpisu do akt pod nr  "] || '-/-'}
-
-RODZICE
-
-Ojciec: , syn ${docData["8. Ojciec: , syn  "] || '-/-'}
-
-Obywatelstwo: ${docData["9. Obywatelstwo"] || '-/-'}
-
-Matka: , córka ${docData["10. Matka: , córka "] || '-/-'}
-
-Obywatelstwo: ${docData["11. Obywatelstwo:  "] || '-/-'}
-
-Miejsce rejestracji: (nazwa i siedziba państwowego USC) ${docData["12. Miejsce rejestracji: (nazwa i siedziba państwowego USC)  "] || '-/-'}
-
-Organ państwowy wydający akt: (nazwa i siedziba państwowego USC) ${docData["13. Organ państwowy wydający akt: (nazwa i siedziba państwowego USC)  "] || '-/-'}
-
-Data wydania: roku. ${docData["14. Data wydania:  roku. "] || '-/-'}
-
-[Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:] ${docData["15. [Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:]"] || '-/-'}
-
-Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ${docData["16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony]  "] || '-/-'}
-
-[Seria i numer dokumentu:] [ - zapis oryginalny] nr ${docData["17. [Seria i numer dokumentu:]  [  - zapis oryginalny] nr  "] || '-/-'}
-
-=========================================================================
-
-Ja, Ołena Sawenko, tłumacz przysięgły języka ukraińskiego, wpisany na listę tłumaczy przysięgłych Ministerstwa Sprawiedliwości RP, pod numerem TP/3/16, niniejszym poświadczam zgodność powyższego tłumaczenia z oryginałem dokumentu w języku ukraińskim.
-
-Numer w repertorium: .
-
-Warszawa, ${new Date().toLocaleDateString('pl-PL')} roku.`;
+    // Nazwa dokumentu
+    const docName = `Tłumaczenie - ${folderName}`;
+    const docPath = path.join(__dirname, 'uploads', `${Date.now()}-translation.docx`);
     
-    // Aktualizacja zawartości dokumentu (obecnie w API v3 nie ma bezpośredniej metody do aktualizacji treści)
-    // Korzystamy z Google Docs API do aktualizacji treści
-    // Ale w tym przykładzie tego nie implementujemy, więc ostatecznie dokument byłby pusty
-    // W prawdziwej implementacji należałoby użyć Docs API: https://developers.google.com/docs/api/reference/rest/v1/documents/batchUpdate
-
-    console.log('[DEBUG] Treść dokumentu została przygotowana, ale nie można jej zaktualizować bezpośrednio przez Drive API');
-    console.log('[DEBUG] W prawdziwej implementacji należałoby użyć Docs API do aktualizacji treści');
+    // Generuj plik DOCX
+    await createDocxTranslation(docData, docPath);
+    
+    // Prześlij plik do Google Drive
+    console.log('[DEBUG] Przesyłanie wygenerowanego dokumentu DOCX do Google Drive');
+    
+    // Metadane dla pliku
+    const fileMetadata = {
+      name: docName,
+      parents: [folderId],
+      // Ustawiamy flagę, aby Google Drive automatycznie konwertował DOCX na format Google Docs
+      mimeType: 'application/vnd.google-apps.document'
+    };
+    
+    // Media z pliku
+    const media = {
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      body: fs.createReadStream(docPath)
+    };
+    
+    // Prześlij plik do Google Drive
+    const uploadResponse = await drive.files.create({
+      resource: fileMetadata,
+      media: media,
+      fields: 'id, name, webViewLink'
+    });
+    
+    console.log('[INFO] Dokument DOCX przesłany i skonwertowany na Google Docs:', uploadResponse.data.id);
+    
+    // Usuń tymczasowy plik DOCX
+    if (fs.existsSync(docPath)) {
+      fs.unlinkSync(docPath);
+      console.log('[DEBUG] Usunięto tymczasowy plik DOCX:', docPath);
+    }
     
     // Zwróć informacje o dokumencie
     return {
-      docId: docId,
-      docName: docName,
-      webViewLink: res.data.webViewLink,
-      content: docContent // Zawartość dokumentu (tylko do debugowania, nie zostanie zapisana w dokumencie)
+      docId: uploadResponse.data.id,
+      docName: uploadResponse.data.name,
+      webViewLink: uploadResponse.data.webViewLink
     };
   } catch (error) {
-    console.error('[ERROR] Błąd podczas tworzenia dokumentu Google Docs:', error);
+    console.error('[ERROR] Błąd podczas tworzenia/przesyłania dokumentu:', error);
     throw error;
   }
 }
