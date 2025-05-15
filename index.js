@@ -345,13 +345,15 @@ app.post('/upload', upload.single('file'), async (req, res) => {
     };
     
     // ID folderu na Google Drive, do którego chcemy uploadować pliki
-    const folderId = process.env.GDRIVE_FOLDER_ID;
+    // Użyj folderId z parametrów, jeśli istnieje, w przeciwnym razie użyj domyślnego
+    const folderId = req.body.folderId || process.env.GDRIVE_FOLDER_ID;
+    console.log(`[DEBUG] Target folder ID: ${folderId} (${req.body.folderId ? 'from request' : 'default'})`);
     diagnosticInfo.folderId = folderId;
     
     if (!folderId) {
       return res.status(500).json({ 
         success: false, 
-        error: 'Brak skonfigurowanego ID folderu Google Drive. Ustaw GDRIVE_FOLDER_ID w zmiennych środowiskowych.',
+        error: 'Brak skonfigurowanego ID folderu Google Drive. Ustaw GDRIVE_FOLDER_ID w zmiennych środowiskowych lub podaj folderId w żądaniu.',
         diagnostic: diagnosticInfo
       });
     }
