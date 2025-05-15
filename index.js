@@ -488,33 +488,70 @@ async function sendFileToFlowiseAI(filePath) {
     const fileName = path.basename(filePath);
     const mimeType = mime.lookup(filePath) || 'application/octet-stream';
     
-    // Poniżej przykładowy kod do wywołania API FlowiseAI
-    // Należy dostosować URL oraz format żądania do rzeczywistego API
-    const form = new FormData();
-    form.append('file', fileBuffer, { filename: fileName, contentType: mimeType });
-    form.append('question', 'Przeanalizuj ten dokument i zwróć informacje o języku, typie dokumentu i danych osobowych.');
+    // Konwertuj plik na base64
+    const fileBase64 = fileBuffer.toString('base64');
+    const dataUri = `data:${mimeType};base64,${fileBase64}`;
     
+    console.log(`[DEBUG] Plik przekonwertowany do base64. Rozmiar: ${fileBase64.length} znaków`);
+    console.log(`[DEBUG] Nazwa pliku: ${fileName}, MIME type: ${mimeType}`);
+    
+    // Przygotowanie prawidłowego formatu JSON dla FlowiseAI
+    const requestData = {
+      question: "Przeanalizuj ten dokument i zwróć informacje o języku, typie dokumentu i danych osobowych.",
+      uploads: [
+        {
+          data: dataUri,
+          type: "file",
+          name: fileName,
+          mime: mimeType
+        }
+      ]
+    };
+    
+    // URL FlowiseAI API
+    // Produkcyjny adres API FlowiseAI
     const apiUrl = 'https://cloud.flowiseai.com/api/v1/prediction/bc4f5360-98e2-4ce9-841d-c44812f5d850';
+    // Lokalny adres (tylko do testów)
+    // const apiUrl = 'http://localhost:3000/api/v1/prediction/bc4f5360-98e2-4ce9-841d-c44812f5d850';
     
     console.log(`[DEBUG] Wywołanie API FlowiseAI: ${apiUrl}`);
+    console.log(`[DEBUG] Format zapytania: ${JSON.stringify({
+      question: requestData.question,
+      uploads: [{ 
+        name: requestData.uploads[0].name,
+        mime: requestData.uploads[0].mime,
+        type: requestData.uploads[0].type,
+        dataLength: requestData.uploads[0].data.length
+      }]
+    })}`);
     
+    // Wysłanie zapytania do API
     const response = await fetch(apiUrl, {
       method: 'POST',
-      body: form,
       headers: {
-        // FormData automatycznie ustawia odpowiedni Content-Type z boundary
-        // Możesz dodać inne nagłówki np. autoryzacyjne jeśli są wymagane
-      }
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestData)
     });
     
+    console.log(`[DEBUG] Status odpowiedzi: ${response.status} ${response.statusText}`);
+    
+    // Jeśli odpowiedź nie jest OK, pobierz zawartość błędu
     if (!response.ok) {
-      const error = await response.text();
-      console.error('[ERROR] FlowiseAI API error:', response.status, error);
-      throw new Error(`FlowiseAI API error: ${response.status} ${response.statusText}`);
+      let errorContent = '';
+      try {
+        errorContent = await response.text();
+        console.error('[ERROR] FlowiseAI API error content:', errorContent);
+      } catch (textErr) {
+        console.error('[ERROR] Nie udało się pobrać treści błędu:', textErr);
+      }
+      
+      throw new Error(`FlowiseAI API error: ${response.status} ${response.statusText}. Content: ${errorContent}`);
     }
     
+    // Parsuj odpowiedź JSON
     const result = await response.json();
-    console.log('[DEBUG] Otrzymano odpowiedź z FlowiseAI:', JSON.stringify(result).substring(0, 200) + '...');
+    console.log('[DEBUG] Otrzymano odpowiedź z FlowiseAI:', JSON.stringify(result).substring(0, 500) + '...');
     
     return result;
   } catch (error) {
