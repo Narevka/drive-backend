@@ -7,6 +7,9 @@ const fs = require('fs');
 const path = require('path');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const FormData = require('form-data');
+const mime = require('mime-types');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 // Konfiguracja aplikacji Express
 const app = express();
@@ -475,9 +478,109 @@ try {
   console.error('Could not create uploads directory:', err);
 }
 
+// Funkcja do wysyłania pliku do analizy przez FlowiseAI
+async function sendFileToFlowiseAI(filePath) {
+  try {
+    console.log('[DEBUG] Wysyłanie pliku do analizy FlowiseAI:', filePath);
+    
+    // Przygotuj dane pliku
+    const fileBuffer = fs.readFileSync(filePath);
+    const fileName = path.basename(filePath);
+    const mimeType = mime.lookup(filePath) || 'application/octet-stream';
+    
+    // Poniżej przykładowy kod do wywołania API FlowiseAI
+    // Należy dostosować URL oraz format żądania do rzeczywistego API
+    const form = new FormData();
+    form.append('file', fileBuffer, { filename: fileName, contentType: mimeType });
+    form.append('question', 'Przeanalizuj ten dokument i zwróć informacje o języku, typie dokumentu i danych osobowych.');
+    
+    const apiUrl = 'https://cloud.flowiseai.com/api/v1/prediction/bc4f5360-98e2-4ce9-841d-c44812f5d850';
+    
+    console.log(`[DEBUG] Wywołanie API FlowiseAI: ${apiUrl}`);
+    
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      body: form,
+      headers: {
+        // FormData automatycznie ustawia odpowiedni Content-Type z boundary
+        // Możesz dodać inne nagłówki np. autoryzacyjne jeśli są wymagane
+      }
+    });
+    
+    if (!response.ok) {
+      const error = await response.text();
+      console.error('[ERROR] FlowiseAI API error:', response.status, error);
+      throw new Error(`FlowiseAI API error: ${response.status} ${response.statusText}`);
+    }
+    
+    const result = await response.json();
+    console.log('[DEBUG] Otrzymano odpowiedź z FlowiseAI:', JSON.stringify(result).substring(0, 200) + '...');
+    
+    return result;
+  } catch (error) {
+    console.error('[ERROR] Błąd podczas analizy dokumentu:', error);
+    throw error;
+  }
+}
+
+// Endpoint do analizy dokumentu przez FlowiseAI
+app.post('/flowwise-analyze', upload.single('file'), async (req, res) => {
+  try {
+    // Sprawdź, czy plik został przesłany
+    if (!req.file) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Brak pliku do analizy' 
+      });
+    }
+
+    console.log('[INFO] Analizowanie pliku:', req.file.originalname);
+    
+    try {
+      // Wywołanie API FlowiseAI
+      const apiResponse = await sendFileToFlowiseAI(req.file.path);
+      
+      // Usuń plik tymczasowy
+      if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      
+      // Zwróć wynik analizy
+      res.status(200).json({
+        success: true,
+        api_response: apiResponse,
+        file_info: {
+          name: req.file.originalname,
+          size: req.file.size,
+          type: req.file.mimetype
+        }
+      });
+    } catch (error) {
+      console.error('[ERROR] Error during FlowiseAI analysis:', error);
+      
+      // Usuń plik tymczasowy nawet w przypadku błędu
+      if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      
+      res.status(500).json({
+        success: false,
+        error: `Błąd analizy przez FlowiseAI: ${error.message}`
+      });
+    }
+  } catch (error) {
+    console.error('Unexpected error:', error);
+    res.status(500).json({
+      success: false,
+      error: `Nieoczekiwany błąd: ${error.message}`,
+    });
+  }
+});
+
 // Uruchom serwer
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Health check endpoint: http://localhost:${PORT}/health`);
   console.log(`Upload endpoint: http://localhost:${PORT}/upload`);
+  console.log(`FlowiseAI analysis endpoint: http://localhost:${PORT}/flowwise-analyze`);
 });
