@@ -155,6 +155,128 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Endpoint do tworzenia folderu w Google Drive
+app.post('/create-folder', express.json(), async (req, res) => {
+  try {
+    // Zmienne dla diagnostyki
+    let diagnosticInfo = {
+      folderName: null,
+      parentFolderId: null,
+      driveClientInitialized: false,
+      folderCreated: false,
+      error: null
+    };
+    
+    // Sprawdź, czy podano nazwę folderu
+    const { folderName, parentFolderId } = req.body;
+    
+    if (!folderName) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Brak nazwy folderu. Podaj parametr folderName w ciele żądania.' 
+      });
+    }
+    
+    diagnosticInfo.folderName = folderName;
+    
+    // Użyj domyślnego folderu głównego jeśli nie podano parent_id
+    const targetParentId = parentFolderId || process.env.GDRIVE_FOLDER_ID;
+    diagnosticInfo.parentFolderId = targetParentId;
+    
+    if (!targetParentId) {
+      return res.status(500).json({ 
+        success: false, 
+        error: 'Brak skonfigurowanego ID folderu Google Drive. Ustaw GDRIVE_FOLDER_ID w zmiennych środowiskowych lub podaj parentFolderId w żądaniu.',
+        diagnostic: diagnosticInfo
+      });
+    }
+
+    try {
+      // Inicjalizacja klienta Google Drive
+      console.log('[DEBUG] Inicjalizacja klienta Google Drive dla tworzenia folderu...');
+      const drive = initDriveClient();
+      diagnosticInfo.driveClientInitialized = true;
+      
+      // Sprawdź, czy mamy dostęp do folderu nadrzędnego (jeśli podano)
+      if (parentFolderId) {
+        console.log(`[DEBUG] Sprawdzanie dostępu do folderu nadrzędnego: ${parentFolderId}`);
+        try {
+          const folderInfo = await validateDriveFolder(drive, parentFolderId);
+          console.log(`[INFO] Folder nadrzędny zweryfikowany: ${folderInfo.name} (${folderInfo.id})`);
+        } catch (folderError) {
+          console.error('[ERROR] Błąd weryfikacji folderu nadrzędnego:', folderError);
+          diagnosticInfo.error = folderError.message;
+          
+          return res.status(500).json({
+            success: false,
+            error: `Błąd z folderem nadrzędnym Google Drive: ${folderError.message}`,
+            diagnostic: diagnosticInfo
+          });
+        }
+      }
+      
+      // Utwórz folder
+      console.log(`[DEBUG] Tworzenie folderu "${folderName}" w folderze o ID: ${targetParentId}`);
+      
+      const folderMetadata = {
+        name: folderName,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [targetParentId],
+      };
+      
+      const result = await drive.files.create({
+        resource: folderMetadata,
+        fields: 'id, name, webViewLink',
+      });
+      
+      diagnosticInfo.folderCreated = true;
+      console.log(`[INFO] Folder utworzony pomyślnie: ${result.data.name} (${result.data.id})`);
+      
+      // Zwróć sukces i dane folderu
+      res.status(200).json({
+        success: true,
+        folderId: result.data.id,
+        folderName: result.data.name,
+        webViewLink: result.data.webViewLink,
+        parentFolderId: targetParentId,
+        diagnostic: diagnosticInfo
+      });
+      
+    } catch (error) {
+      console.error('[ERROR] Error during Google Drive folder creation:', error);
+      diagnosticInfo.error = error.message;
+      
+      // Szczegółowa diagnostyka błędu
+      let errorDetails = 'Nieznany błąd';
+      if (error.code) {
+        diagnosticInfo.errorCode = error.code;
+      }
+      
+      if (error.response && error.response.data) {
+        console.error('[ERROR] Odpowiedź API:', JSON.stringify(error.response.data));
+        diagnosticInfo.apiResponse = error.response.data;
+        
+        if (error.response.data.error) {
+          errorDetails = `${error.response.data.error.message} (${error.response.data.error.code})`;
+        }
+      }
+      
+      res.status(500).json({
+        success: false,
+        error: `Błąd tworzenia folderu w Google Drive: ${error.message}`,
+        errorDetails: errorDetails,
+        diagnostic: diagnosticInfo
+      });
+    }
+  } catch (error) {
+    console.error('Unexpected error:', error);
+    res.status(500).json({
+      success: false,
+      error: `Nieoczekiwany błąd: ${error.message}`,
+    });
+  }
+});
+
 // Funkcja do sprawdzania dostępu do folderu Google Drive
 const validateDriveFolder = async (drive, folderId) => {
   console.log(`[DEBUG] Sprawdzanie dostępu do folderu: ${folderId}`);
