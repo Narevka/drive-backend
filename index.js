@@ -719,20 +719,19 @@ async function createDocxTranslation(docData, outputPath) {
     
     // Funkcja pomocnicza do tworzenia paragrafów
     const createParagraph = (text, options = {}) => {
-      const paragraph = new Paragraph({
+      return new Paragraph({
         alignment: options.alignment || AlignmentType.LEFT,
         spacing: { before: options.spacingBefore || 0, after: options.spacingAfter || 200 },
+        children: [
+          new TextRun({
+            text: text,
+            bold: options.bold || false,
+            italics: options.italics || false,
+            size: options.size || 24,
+          })
+        ],
         ...options
       });
-      
-      paragraph.addRun(new TextRun({
-        text: text,
-        bold: options.bold || false,
-        italics: options.italics || false,
-        size: options.size || 24,
-      }));
-      
-      return paragraph;
     };
     
     // Dodaj tytuł dokumentu
