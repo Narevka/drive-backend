@@ -1,0 +1,24 @@
+# Pliki konfiguracyjne
+.env
+*.env
+*.env.*
+!.env.example
+
+# Klucze i sekrety
+service-account.json
+*.key
+*.pem
+*.p12
+
+# Katalogi node_modules i inne
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Katalog tymczasowych uploadów
+uploads/
+
+# Inne pliki systemowe
+.DS_Store
+Thumbs.db
