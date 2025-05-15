@@ -714,8 +714,95 @@ async function createDocxTranslation(docData, outputPath) {
   try {
     console.log('[DEBUG] Generowanie dokumentu DOCX z danymi');
     
-    // Utwórz nowy dokument
+    // Tablica paragrafów do dodania do dokumentu
+    const paragraphs = [];
+    
+    // Funkcja pomocnicza do tworzenia paragrafów
+    const createParagraph = (text, options = {}) => {
+      const paragraph = new Paragraph({
+        alignment: options.alignment || AlignmentType.LEFT,
+        spacing: { before: options.spacingBefore || 0, after: options.spacingAfter || 200 },
+        ...options
+      });
+      
+      paragraph.addRun(new TextRun({
+        text: text,
+        bold: options.bold || false,
+        italics: options.italics || false,
+        size: options.size || 24,
+      }));
+      
+      return paragraph;
+    };
+    
+    // Dodaj tytuł dokumentu
+    paragraphs.push(createParagraph("TŁUMACZENIE UWIERZYTELNIONE Z JĘZYKA UKRAIŃSKIEGO", {
+      alignment: AlignmentType.CENTER,
+      bold: true,
+      size: 28,
+      spacingAfter: 400
+    }));
+
+    // Dodaj informacje o dokumencie
+    paragraphs.push(createParagraph("[Uwagi tłumacza oznaczono kursywą w nawiasie kwadratowym.]", { italics: true }));
+    paragraphs.push(createParagraph("[Dokument w postaci jednostronicowego druku urzędowego z godłem państwowym Ukrainy. Pisownia imion i nazwisk zgodna z ukraińską oficjalną transliteracją na litery alfabetu łacińskiego]", 
+      { italics: true, spacingAfter: 400 }));
+
+    // Dodaj nagłówek UKRAINA
+    paragraphs.push(createParagraph(`UKRAINA ${docData["UKRAINA -/- "] || '-/-'}`, 
+      { bold: true, alignment: AlignmentType.CENTER, spacingAfter: 400 }));
+
+    // Dodaj nagłówek AKT URODZENIA
+    paragraphs.push(createParagraph("AKT URODZENIA", 
+      { bold: true, alignment: AlignmentType.CENTER, spacingAfter: 400 }));
+
+    // Dodaj dane osobowe
+    paragraphs.push(createParagraph(`Nazwisko: ${docData["Naziwsko"] || '-/-'}`));
+    paragraphs.push(createParagraph(`Imię: ${docData["3. Imie"] || '-/-'}`));
+    paragraphs.push(createParagraph(`Imię odojcowskie: ${docData["4. imie ojcowskie"] || '-/-'}`));
+    paragraphs.push(createParagraph(`roku (słownie: ) ${docData["5. roku (slownie)"] || '-/-'}`));
+    paragraphs.push(createParagraph(`miejsce urodzenia: Ukraina, obwód zaporoski, ${docData["6. miejsce urodzenia: Ukraina, obwód zaporoski,  "] || '-/-'}`));
+    paragraphs.push(createParagraph(`o czym w Księdze Rejestracji Urodzeń w dniu roku dokonano odpowiedniego wpisu do akt pod nr ${docData["7. o czym w Księdze Rejestracji Urodzeń w dniu  roku dokonano odpowiedniego wpisu do akt pod nr  "] || '-/-'}`));
+
+    // Dodaj nagłówek RODZICE
+    paragraphs.push(createParagraph("RODZICE", 
+      { bold: true, alignment: AlignmentType.CENTER, spacingBefore: 400, spacingAfter: 400 }));
+
+    // Dodaj dane rodziców
+    paragraphs.push(createParagraph(`Ojciec: , syn ${docData["8. Ojciec: , syn  "] || '-/-'}`));
+    paragraphs.push(createParagraph(`Obywatelstwo: ${docData["9. Obywatelstwo"] || '-/-'}`));
+    paragraphs.push(createParagraph(`Matka: , córka ${docData["10. Matka: , córka "] || '-/-'}`));
+    paragraphs.push(createParagraph(`Obywatelstwo: ${docData["11. Obywatelstwo:  "] || '-/-'}`));
+
+    // Dodaj pozostałe informacje
+    paragraphs.push(createParagraph(`Miejsce rejestracji: (nazwa i siedziba państwowego USC) ${docData["12. Miejsce rejestracji: (nazwa i siedziba państwowego USC)  "] || '-/-'}`));
+    paragraphs.push(createParagraph(`Organ państwowy wydający akt: (nazwa i siedziba państwowego USC) ${docData["13. Organ państwowy wydający akt: (nazwa i siedziba państwowego USC)  "] || '-/-'}`));
+    paragraphs.push(createParagraph(`Data wydania: roku. ${docData["14. Data wydania:  roku. "] || '-/-'}`));
+    paragraphs.push(createParagraph(`[Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:] ${docData["15. [Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:]"] || '-/-'}`, 
+      { italics: true }));
+    paragraphs.push(createParagraph(`Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ${docData["16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony]  "] || '-/-'}`));
+    paragraphs.push(createParagraph(`[Seria i numer dokumentu:] [ - zapis oryginalny] nr ${docData["17. [Seria i numer dokumentu:]  [  - zapis oryginalny] nr  "] || '-/-'}`, 
+      { italics: true }));
+
+    // Dodaj linię rozdzielającą
+    paragraphs.push(createParagraph("=========================================================================", {
+      alignment: AlignmentType.CENTER,
+      spacingBefore: 400,
+      spacingAfter: 400
+    }));
+
+    // Dodaj poświadczenie tłumacza
+    paragraphs.push(createParagraph("Ja, Ołena Sawenko, tłumacz przysięgły języka ukraińskiego, wpisany na listę tłumaczy przysięgłych Ministerstwa Sprawiedliwości RP, pod numerem TP/3/16, niniejszym poświadczam zgodność powyższego tłumaczenia z oryginałem dokumentu w języku ukraińskim."));
+    paragraphs.push(createParagraph("Numer w repertorium: ."));
+    paragraphs.push(createParagraph(`Warszawa, ${new Date().toLocaleDateString('pl-PL')} roku.`, 
+      { spacingBefore: 400 }));
+
+    // Utwórz nowy dokument z sekcjami
     const doc = new Document({
+      sections: [{
+        properties: {},
+        children: paragraphs
+      }],
       styles: {
         paragraphStyles: [
           {
@@ -754,79 +841,6 @@ async function createDocxTranslation(docData, outputPath) {
         ],
       },
     });
-
-    // Funkcja pomocnicza do tworzenia paragrafów
-    const addParagraph = (text, options = {}) => {
-      let paragraph = new Paragraph({
-        alignment: options.alignment || AlignmentType.LEFT,
-        spacing: { before: options.spacingBefore || 0, after: options.spacingAfter || 200 },
-        ...options
-      });
-      
-      paragraph.addRun(new TextRun({
-        text: text,
-        bold: options.bold || false,
-        italics: options.italics || false,
-        size: options.size || 24,
-      }));
-      
-      doc.addParagraph(paragraph);
-    };
-
-    // Dodaj tytuł dokumentu
-    addParagraph("TŁUMACZENIE UWIERZYTELNIONE Z JĘZYKA UKRAIŃSKIEGO", {
-      alignment: AlignmentType.CENTER,
-      bold: true,
-      size: 28,
-      spacingAfter: 400
-    });
-
-    // Dodaj informacje o dokumencie
-    addParagraph("[Uwagi tłumacza oznaczono kursywą w nawiasie kwadratowym.]", { italics: true });
-    addParagraph("[Dokument w postaci jednostronicowego druku urzędowego z godłem państwowym Ukrainy. Pisownia imion i nazwisk zgodna z ukraińską oficjalną transliteracją na litery alfabetu łacińskiego]", { italics: true, spacingAfter: 400 });
-
-    // Dodaj nagłówek UKRAINA
-    addParagraph(`UKRAINA ${docData["UKRAINA -/- "] || '-/-'}`, { bold: true, alignment: AlignmentType.CENTER, spacingAfter: 400 });
-
-    // Dodaj nagłówek AKT URODZENIA
-    addParagraph("AKT URODZENIA", { bold: true, alignment: AlignmentType.CENTER, spacingAfter: 400 });
-
-    // Dodaj dane osobowe
-    addParagraph(`Nazwisko: ${docData["Naziwsko"] || '-/-'}`);
-    addParagraph(`Imię: ${docData["3. Imie"] || '-/-'}`);
-    addParagraph(`Imię odojcowskie: ${docData["4. imie ojcowskie"] || '-/-'}`);
-    addParagraph(`roku (słownie: ) ${docData["5. roku (slownie)"] || '-/-'}`);
-    addParagraph(`miejsce urodzenia: Ukraina, obwód zaporoski, ${docData["6. miejsce urodzenia: Ukraina, obwód zaporoski,  "] || '-/-'}`);
-    addParagraph(`o czym w Księdze Rejestracji Urodzeń w dniu roku dokonano odpowiedniego wpisu do akt pod nr ${docData["7. o czym w Księdze Rejestracji Urodzeń w dniu  roku dokonano odpowiedniego wpisu do akt pod nr  "] || '-/-'}`);
-
-    // Dodaj nagłówek RODZICE
-    addParagraph("RODZICE", { bold: true, alignment: AlignmentType.CENTER, spacingBefore: 400, spacingAfter: 400 });
-
-    // Dodaj dane rodziców
-    addParagraph(`Ojciec: , syn ${docData["8. Ojciec: , syn  "] || '-/-'}`);
-    addParagraph(`Obywatelstwo: ${docData["9. Obywatelstwo"] || '-/-'}`);
-    addParagraph(`Matka: , córka ${docData["10. Matka: , córka "] || '-/-'}`);
-    addParagraph(`Obywatelstwo: ${docData["11. Obywatelstwo:  "] || '-/-'}`);
-
-    // Dodaj pozostałe informacje
-    addParagraph(`Miejsce rejestracji: (nazwa i siedziba państwowego USC) ${docData["12. Miejsce rejestracji: (nazwa i siedziba państwowego USC)  "] || '-/-'}`);
-    addParagraph(`Organ państwowy wydający akt: (nazwa i siedziba państwowego USC) ${docData["13. Organ państwowy wydający akt: (nazwa i siedziba państwowego USC)  "] || '-/-'}`);
-    addParagraph(`Data wydania: roku. ${docData["14. Data wydania:  roku. "] || '-/-'}`);
-    addParagraph(`[Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:] ${docData["15. [Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:]"] || '-/-'}`, { italics: true });
-    addParagraph(`Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ${docData["16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony]  "] || '-/-'}`);
-    addParagraph(`[Seria i numer dokumentu:] [ - zapis oryginalny] nr ${docData["17. [Seria i numer dokumentu:]  [  - zapis oryginalny] nr  "] || '-/-'}`, { italics: true });
-
-    // Dodaj linię rozdzielającą
-    addParagraph("=========================================================================", {
-      alignment: AlignmentType.CENTER,
-      spacingBefore: 400,
-      spacingAfter: 400
-    });
-
-    // Dodaj poświadczenie tłumacza
-    addParagraph("Ja, Ołena Sawenko, tłumacz przysięgły języka ukraińskiego, wpisany na listę tłumaczy przysięgłych Ministerstwa Sprawiedliwości RP, pod numerem TP/3/16, niniejszym poświadczam zgodność powyższego tłumaczenia z oryginałem dokumentu w języku ukraińskim.");
-    addParagraph("Numer w repertorium: .");
-    addParagraph(`Warszawa, ${new Date().toLocaleDateString('pl-PL')} roku.`, { spacingBefore: 400 });
 
     // Zapisz dokument
     const buffer = await Packer.toBuffer(doc);
