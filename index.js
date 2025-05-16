@@ -611,7 +611,7 @@ małżeństwa i zgonu. Twoim zadaniem jest dokładna analiza obrazu dokumentu i 
 // Nowa funkcja do przetwarzania dokumentu przez GPT-4o Vision
 async function processDocumentWithGPT4o(filePath) {
   try {
-    console.log('[DEBUG] Rozpoczynam dwuetapową analizę dokumentu z GPT-4o');
+    console.log('[DEBUG] Rozpoczynam trzystopniową analizę dokumentu z GPT-4o');
     
     // Krok 1: Najpierw analizujemy typ dokumentu z wymuszeniem formatu JSON
     console.log('[DEBUG] Krok 1: Klasyfikacja dokumentu');
@@ -676,6 +676,7 @@ Jest to jeden z typów dokumentów: akt urodzenia, akt małżeństwa lub akt zgo
     
     // Krok 2: Szczegółowa analiza na podstawie typu dokumentu
     let detailedResult = null;
+    let extractedData = null;
     
     if (documentType !== 'unknown') {
       // Funkcje i prompty w zależności od typu dokumentu
@@ -683,7 +684,7 @@ Jest to jeden z typów dokumentów: akt urodzenia, akt małżeństwa lub akt zgo
       let functionDefinition = null;
       
       if (documentType === 'akt_urodzenia') {
-        detailedPrompt = `Przeanalizuj szczegółowo ten akt urodzenia i wyodrębnij wszystkie dane.`;
+        detailedPrompt = `Przeanalizuj szczegółowo ten akt urodzenia i wyodrębnij wszystkie dane. Uwzględnij informacje w języku oryginalnym (ukraińskim lub rosyjskim).`;
         
         functionDefinition = {
           name: "extract_birth_certificate_data",
@@ -693,67 +694,63 @@ Jest to jeden z typów dokumentów: akt urodzenia, akt małżeństwa lub akt zgo
             properties: {
               "Naziwsko": {
                 type: "string",
-                description: "Nazwisko osoby której dotyczy cały dokument"
+                description: "Nazwisko osoby której dotyczy cały dokument (w alfabecie ukraińskim/rosyjskim)"
               },
               "Imie": {
                 type: "string",
-                description: "Imię osoby której dotyczy cały dokument"
+                description: "Imię osoby której dotyczy cały dokument (w alfabecie ukraińskim/rosyjskim)"
               },
               "imie ojcowskie": {
                 type: "string",
-                description: "imię ojcowskie osoby"
+                description: "Imię ojcowskie osoby (w alfabecie ukraińskim/rosyjskim)"
               },
               "roku (slownie)": {
                 type: "string",
-                description: "Rok urodzenia słownie"
+                description: "Rok urodzenia słownie (w alfabecie ukraińskim/rosyjskim)"
               },
               "miejsce urodzenia": {
                 type: "string",
-                description: "Miejsce urodzenia osoby"
+                description: "Miejsce urodzenia osoby (w alfabecie ukraińskim/rosyjskim)"
+              },
+              "Numer wpisu": {
+                type: "string",
+                description: "Numer wpisu w księdze rejestracyjnej"
               },
               "Ojciec": {
                 type: "string",
-                description: "Imię i nazwisko ojca"
+                description: "Imię i nazwisko ojca (w alfabecie ukraińskim/rosyjskim)"
               },
               "Obywatelstwo ojca": {
                 type: "string",
-                description: "Obywatelstwo ojca"
+                description: "Obywatelstwo ojca (w alfabecie ukraińskim/rosyjskim)"
               },
               "Matka": {
                 type: "string",
-                description: "Imię i nazwisko matki"
+                description: "Imię i nazwisko matki (w alfabecie ukraińskim/rosyjskim)"
               },
               "Obywatelstwo matki": {
                 type: "string",
-                description: "Obywatelstwo matki"
+                description: "Obywatelstwo matki (w alfabecie ukraińskim/rosyjskim)"
               },
               "Miejsce rejestracji": {
                 type: "string",
-                description: "Miejsce rejestracji aktu"
+                description: "Miejsce rejestracji aktu (w alfabecie ukraińskim/rosyjskim)"
               },
               "Organ państwowy wydający akt": {
                 type: "string",
-                description: "Nazwa organu, który wydał akt"
+                description: "Nazwa organu, który wydał akt (w alfabecie ukraińskim/rosyjskim)"
               },
               "Data wydania": {
                 type: "string",
-                description: "Data wydania aktu"
+                description: "Data wydania aktu (w alfabecie ukraińskim/rosyjskim)"
               },
               "Seria i numer dokumentu": {
                 type: "string",
                 description: "Seria i numer dokumentu"
               },
-              "15. [Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:]": {
+              "Kierownik USC": {
                 type: "string",
-                description: "Treść pieczęci"
-              },
-              "16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ": {
-                type: "string",
-                description: "Podpis kierownika USC"
-              },
-              "17. [Seria i numer dokumentu:] [ - zapis oryginalny] nr ": {
-                type: "string",
-                description: "Szczegółowe informacje o serii i numerze dokumentu"
+                description: "Informacje o kierowniku USC (w alfabecie ukraińskim/rosyjskim)"
               }
             },
             required: ["Naziwsko", "Imie"]
@@ -780,12 +777,141 @@ Jest to jeden z typów dokumentów: akt urodzenia, akt małżeństwa lub akt zgo
         
         console.log('[DEBUG] Otrzymano szczegółową analizę dokumentu');
         
-        // Przygotuj format odpowiedzi zgodny z poprzednim API
-        detailedResult = {
-          text: rawResult  // Powinien być już czystym JSON
-        };
+        try {
+          // Parsujemy wynik do obiektu JavaScript
+          extractedData = JSON.parse(rawResult);
+          
+          // Przygotuj format odpowiedzi zgodny z poprzednim API
+          detailedResult = {
+            text: rawResult  // Powinien być już czystym JSON
+          };
+        } catch (parseError) {
+          console.error('[ERROR] Nie udało się sparsować odpowiedzi JSON z analizy szczegółowej:', parseError);
+          detailedResult = {
+            text: rawResult  // Zwracamy niezmieniony tekst
+          };
+        }
       } catch (detailError) {
         console.error('[ERROR] Błąd podczas szczegółowej analizy:', detailError);
+      }
+      
+      // Krok 3: Tłumaczenie wyciągniętych danych
+      let translatedResult = null;
+      
+      if (extractedData) {
+        console.log(`[DEBUG] Krok 3: Tłumaczenie wyciągniętych danych na język polski`);
+        
+        // Przygotowujemy funkcję dla tłumaczenia
+        const translationFunction = {
+          name: "translate_document_data",
+          description: "Tłumaczy wyciągnięte dane z dokumentu ukraińskiego/rosyjskiego na język polski",
+          parameters: {
+            type: "object",
+            properties: {
+              "Naziwsko": {
+                type: "string",
+                description: "Tłumaczenie nazwiska na język polski"
+              },
+              "Imie": {
+                type: "string",
+                description: "Tłumaczenie imienia na język polski"
+              },
+              "imie ojcowskie": {
+                type: "string",
+                description: "Tłumaczenie imienia ojcowskiego na język polski"
+              },
+              "roku (slownie)": {
+                type: "string",
+                description: "Tłumaczenie roku słownie na język polski"
+              },
+              "miejsce urodzenia": {
+                type: "string",
+                description: "Tłumaczenie miejsca urodzenia na język polski"
+              },
+              "Numer wpisu": {
+                type: "string",
+                description: "Tłumaczenie numeru wpisu na język polski"
+              },
+              "Ojciec": {
+                type: "string",
+                description: "Tłumaczenie danych ojca na język polski"
+              },
+              "Obywatelstwo ojca": {
+                type: "string",
+                description: "Tłumaczenie obywatelstwa ojca na język polski"
+              },
+              "Matka": {
+                type: "string",
+                description: "Tłumaczenie danych matki na język polski"
+              },
+              "Obywatelstwo matki": {
+                type: "string",
+                description: "Tłumaczenie obywatelstwa matki na język polski"
+              },
+              "Miejsce rejestracji": {
+                type: "string",
+                description: "Tłumaczenie miejsca rejestracji na język polski"
+              },
+              "Organ państwowy wydający akt": {
+                type: "string",
+                description: "Tłumaczenie nazwy organu na język polski"
+              },
+              "Data wydania": {
+                type: "string",
+                description: "Tłumaczenie daty wydania na język polski"
+              },
+              "Seria i numer dokumentu": {
+                type: "string",
+                description: "Tłumaczenie serii i numeru dokumentu na język polski"
+              },
+              "Kierownik USC": {
+                type: "string",
+                description: "Tłumaczenie informacji o kierowniku USC na język polski"
+              }
+            },
+            required: ["Naziwsko", "Imie"]
+          }
+        };
+        
+        try {
+          // Przygotowujemy prompt do tłumaczenia
+          const translationPrompt = `Przetłumacz poniższe dane wyciągnięte z ukraińskiego/rosyjskiego aktu urodzenia na język polski. 
+Uwzględnij specyfikę tłumaczenia dokumentów urzędowych, stosuj polskie nazewnictwo dla urzędów i instytucji.
+Zachowaj odpowiednią transkrypcję imion i nazwisk z cyrylicy na alfabet łaciński według polskich standardów.
+
+Dane do przetłumaczenia:
+${JSON.stringify(extractedData, null, 2)}`;
+
+          const translationRawResult = await analyzeImageWithGPT4o(
+            filePath, 
+            translationPrompt,
+            { functionDefinition: translationFunction }
+          );
+          
+          console.log('[DEBUG] Otrzymano tłumaczenie danych');
+          
+          try {
+            // Parsujemy wynik tłumaczenia
+            const translatedData = JSON.parse(translationRawResult);
+            
+            // Przygotuj obiekt zawierający zarówno oryginalne dane jak i tłumaczenia
+            const combinedResult = {
+              original: extractedData,
+              translated: translatedData
+            };
+            
+            // Aktualizujemy detailedResult, aby zawierał oba zestawy danych
+            detailedResult = {
+              text: JSON.stringify(combinedResult)
+            };
+            
+            console.log('[DEBUG] Przygotowano kombinowany wynik z oryginalnymi danymi i tłumaczeniem');
+          } catch (parseError) {
+            console.error('[ERROR] Nie udało się sparsować odpowiedzi JSON z tłumaczenia:', parseError);
+          }
+        } catch (translationError) {
+          console.error('[ERROR] Błąd podczas tłumaczenia danych:', translationError);
+        }
       }
     } else {
       console.log('[WARNING] Nie rozpoznano typu dokumentu, pomijam szczegółową analizę');
@@ -869,6 +995,16 @@ async function createDocxTranslation(docData, outputPath) {
     // Tablica paragrafów do dodania do dokumentu
     const paragraphs = [];
     
+    // Sprawdź strukturę danych - czy mamy oryginal+tłumaczenie, czy tylko podstawowe dane
+    let originalData = docData;
+    let translatedData = null;
+    
+    if (docData.original && docData.translated) {
+      console.log('[DEBUG] Wykryto dane w formacie oryginal/tłumaczenie');
+      originalData = docData.original;
+      translatedData = docData.translated;
+    }
+    
     // Funkcja pomocnicza do tworzenia paragrafów
     const createParagraph = (text, options = {}) => {
       return new Paragraph({
@@ -886,6 +1022,14 @@ async function createDocxTranslation(docData, outputPath) {
       });
     };
     
+    // Funkcja pomocnicza do pobierania danych z preferencją dla tłumaczenia
+    const getFieldValue = (fieldName) => {
+      if (translatedData && translatedData[fieldName]) {
+        return translatedData[fieldName];
+      }
+      return originalData[fieldName] || '-/-';
+    };
+    
     // Dodaj tytuł dokumentu
     paragraphs.push(createParagraph("TŁUMACZENIE UWIERZYTELNIONE Z JĘZYKA UKRAIŃSKIEGO", {
       alignment: AlignmentType.CENTER,
@@ -900,7 +1044,7 @@ async function createDocxTranslation(docData, outputPath) {
       { italics: true, spacingAfter: 400 }));
 
     // Dodaj nagłówek UKRAINA
-    paragraphs.push(createParagraph(`UKRAINA ${docData["UKRAINA -/- "] || '-/-'}`, 
+    paragraphs.push(createParagraph(`UKRAINA ${originalData["UKRAINA -/- "] || '-/-'}`, 
       { bold: true, alignment: AlignmentType.CENTER, spacingAfter: 400 }));
 
     // Dodaj nagłówek AKT URODZENIA
@@ -908,31 +1052,38 @@ async function createDocxTranslation(docData, outputPath) {
       { bold: true, alignment: AlignmentType.CENTER, spacingAfter: 400 }));
 
     // Dodaj dane osobowe
-    paragraphs.push(createParagraph(`Nazwisko: ${docData["Naziwsko"] || '-/-'}`));
-    paragraphs.push(createParagraph(`Imię: ${docData["Imie"] || '-/-'}`));
-    paragraphs.push(createParagraph(`Imię odojcowskie: ${docData["imie ojcowskie"] || '-/-'}`));
-    paragraphs.push(createParagraph(`roku (słownie: ) ${docData["roku (slownie)"] || '-/-'}`));
-    paragraphs.push(createParagraph(`miejsce urodzenia: Ukraina, obwód zaporoski, ${docData["miejsce urodzenia"] || '-/-'}`));
-    paragraphs.push(createParagraph(`o czym w Księdze Rejestracji Urodzeń w dniu roku dokonano odpowiedniego wpisu do akt pod nr ${docData["Numer wpisu"] || '-/-'}`));
+    paragraphs.push(createParagraph(`Nazwisko: ${getFieldValue("Naziwsko")}`));
+    paragraphs.push(createParagraph(`Imię: ${getFieldValue("Imie")}`));
+    paragraphs.push(createParagraph(`Imię ojcowskie: ${getFieldValue("imie ojcowskie")}`));
+    paragraphs.push(createParagraph(`roku (słownie: ) ${getFieldValue("roku (slownie)")}`));
+    paragraphs.push(createParagraph(`miejsce urodzenia: Ukraina, obwód zaporoski, ${getFieldValue("miejsce urodzenia")}`));
+    paragraphs.push(createParagraph(`o czym w Księdze Rejestracji Urodzeń w dniu roku dokonano odpowiedniego wpisu do akt pod nr ${getFieldValue("Numer wpisu")}`));
 
     // Dodaj nagłówek RODZICE
     paragraphs.push(createParagraph("RODZICE", 
       { bold: true, alignment: AlignmentType.CENTER, spacingBefore: 400, spacingAfter: 400 }));
 
     // Dodaj dane rodziców
-    paragraphs.push(createParagraph(`Ojciec: ${docData["Ojciec"] || '-/-'}`));
-    paragraphs.push(createParagraph(`Obywatelstwo: ${docData["Obywatelstwo ojca"] || '-/-'}`));
-    paragraphs.push(createParagraph(`Matka: ${docData["Matka"] || '-/-'}`));
-    paragraphs.push(createParagraph(`Obywatelstwo: ${docData["Obywatelstwo matki"] || '-/-'}`));
+    paragraphs.push(createParagraph(`Ojciec: ${getFieldValue("Ojciec")}`));
+    paragraphs.push(createParagraph(`Obywatelstwo: ${getFieldValue("Obywatelstwo ojca")}`));
+    paragraphs.push(createParagraph(`Matka: ${getFieldValue("Matka")}`));
+    paragraphs.push(createParagraph(`Obywatelstwo: ${getFieldValue("Obywatelstwo matki")}`));
 
     // Dodaj pozostałe informacje
-    paragraphs.push(createParagraph(`Miejsce rejestracji: (nazwa i siedziba państwowego USC) ${docData["Miejsce rejestracji"] || '-/-'}`));
-    paragraphs.push(createParagraph(`Organ państwowy wydający akt: (nazwa i siedziba państwowego USC) ${docData["Organ państwowy wydający akt"] || '-/-'}`));
-    paragraphs.push(createParagraph(`Data wydania: ${docData["Data wydania"] || '-/-'}`));
-    paragraphs.push(createParagraph(`[Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:] ${docData["15. [Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:]"] || '-/-'}`, 
+    paragraphs.push(createParagraph(`Miejsce rejestracji: (nazwa i siedziba państwowego USC) ${getFieldValue("Miejsce rejestracji")}`));
+    paragraphs.push(createParagraph(`Organ państwowy wydający akt: (nazwa i siedziba państwowego USC) ${getFieldValue("Organ państwowy wydający akt")}`));
+    paragraphs.push(createParagraph(`Data wydania: ${getFieldValue("Data wydania")}`));
+    
+    // Dla pól specjalnych
+    const pieczec = originalData["15. [Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:]"] || '-/-';
+    paragraphs.push(createParagraph(`[Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:] ${pieczec}`, 
       { italics: true }));
-    paragraphs.push(createParagraph(`Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ${docData["16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] "] || docData["Kierownik USC"] || '-/-'}`));
-    paragraphs.push(createParagraph(`[Seria i numer dokumentu:] [ - zapis oryginalny] nr ${docData["Seria i numer dokumentu"] || '-/-'}`, 
+    
+    const kierownikUSC = getFieldValue("Kierownik USC") || originalData["16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] "] || '-/-';
+    paragraphs.push(createParagraph(`Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ${kierownikUSC}`));
+    
+    const seriaDoc = getFieldValue("Seria i numer dokumentu");
+    paragraphs.push(createParagraph(`[Seria i numer dokumentu:] [ - zapis oryginalny] nr ${seriaDoc}`, 
       { italics: true }));
 
     // Dodaj linię rozdzielającą
@@ -947,6 +1098,32 @@ async function createDocxTranslation(docData, outputPath) {
     paragraphs.push(createParagraph("Numer w repertorium: ."));
     paragraphs.push(createParagraph(`Warszawa, ${new Date().toLocaleDateString('pl-PL')} roku.`, 
       { spacingBefore: 400 }));
+
+    // Jeśli mamy tłumaczenie, dodaj sekcję z oryginalnymi danymi
+    if (translatedData) {
+      // Dodaj drugą sekcję z oryginalnymi danymi dla referencji
+      paragraphs.push(createParagraph("", { spacingBefore: 800, spacingAfter: 400 }));
+      paragraphs.push(createParagraph("ORYGINALNY TEKST (JĘZYK UKRAIŃSKI/ROSYJSKI)", {
+        alignment: AlignmentType.CENTER,
+        bold: true,
+        size: 26,
+        spacingAfter: 400
+      }));
+      
+      paragraphs.push(createParagraph(`Nazwisko: ${originalData["Naziwsko"] || '-/-'}`));
+      paragraphs.push(createParagraph(`Imię: ${originalData["Imie"] || '-/-'}`));
+      paragraphs.push(createParagraph(`Imię ojcowskie: ${originalData["imie ojcowskie"] || '-/-'}`));
+      paragraphs.push(createParagraph(`roku (słownie): ${originalData["roku (slownie)"] || '-/-'}`));
+      paragraphs.push(createParagraph(`miejsce urodzenia: ${originalData["miejsce urodzenia"] || '-/-'}`));
+      
+      // Inne ważne pola
+      if (originalData["Ojciec"]) {
+        paragraphs.push(createParagraph(`Ojciec: ${originalData["Ojciec"]}`));
+      }
+      if (originalData["Matka"]) {
+        paragraphs.push(createParagraph(`Matka: ${originalData["Matka"]}`));
+      }
+    }
 
     // Utwórz nowy dokument z sekcjami
     const doc = new Document({
