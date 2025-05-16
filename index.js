@@ -1,4 +1,4 @@
-// Small change for GitHub test
+// Backend API for document analysis and Google Drive operations
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -12,6 +12,7 @@ const FormData = require('form-data');
 const mime = require('mime-types');
 const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, BorderStyle } = require('docx');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+const OpenAI = require('openai');
 
 // Konfiguracja aplikacji Express
 const app = express();
@@ -482,111 +483,111 @@ try {
   console.error('Could not create uploads directory:', err);
 }
 
-// Funkcja do wysyłania pliku do analizy przez FlowiseAI
-async function sendFileToFlowiseAI(filePath, flowId, question = "Przeanalizuj ten dokument i zwróć informacje o języku, typie dokumentu i danych osobowych.") {
+// Inicjalizacja klienta OpenAI
+function initOpenAIClient() {
   try {
-    console.log(`[DEBUG] Wysyłanie pliku do analizy FlowiseAI (Flow ID: ${flowId}):`, filePath);
+    console.log('[DEBUG] Inicjalizacja klienta OpenAI...');
     
-    // Przygotuj dane pliku
-    const fileBuffer = fs.readFileSync(filePath);
-    const fileName = path.basename(filePath);
-    const mimeType = mime.lookup(filePath) || 'application/octet-stream';
-    
-    // Konwertuj plik na base64
-    const fileBase64 = fileBuffer.toString('base64');
-    const dataUri = `data:${mimeType};base64,${fileBase64}`;
-    
-    console.log(`[DEBUG] Plik przekonwertowany do base64. Rozmiar: ${fileBase64.length} znaków`);
-    console.log(`[DEBUG] Nazwa pliku: ${fileName}, MIME type: ${mimeType}`);
-    
-    // Przygotowanie prawidłowego formatu JSON dla FlowiseAI
-    const requestData = {
-      question: question,
-      uploads: [
-        {
-          data: dataUri,
-          type: "file",
-          name: fileName,
-          mime: mimeType
-        }
-      ]
-    };
-    
-    // URL FlowiseAI API dynamicznie na podstawie flowId
-    const apiUrl = `https://cloud.flowiseai.com/api/v1/prediction/${flowId}`;
-    
-    console.log(`[DEBUG] Wywołanie API FlowiseAI: ${apiUrl}`);
-    console.log(`[DEBUG] Format zapytania: ${JSON.stringify({
-      question: requestData.question,
-      uploads: [{ 
-        name: requestData.uploads[0].name,
-        mime: requestData.uploads[0].mime,
-        type: requestData.uploads[0].type,
-        dataLength: requestData.uploads[0].data.length
-      }]
-    })}`);
-    
-    // Wysłanie zapytania do API
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestData)
-    });
-    
-    console.log(`[DEBUG] Status odpowiedzi: ${response.status} ${response.statusText}`);
-    
-    // Jeśli odpowiedź nie jest OK, pobierz zawartość błędu
-    if (!response.ok) {
-      let errorContent = '';
-      try {
-        errorContent = await response.text();
-        console.error('[ERROR] FlowiseAI API error content:', errorContent);
-      } catch (textErr) {
-        console.error('[ERROR] Nie udało się pobrać treści błędu:', textErr);
-      }
-      
-      throw new Error(`FlowiseAI API error: ${response.status} ${response.statusText}. Content: ${errorContent}`);
+    // Sprawdź czy mamy klucz API
+    if (!process.env.OPENAI_API_KEY) {
+      console.error('[ERROR] Brak klucza API OpenAI');
+      throw new Error('Brak wymaganego klucza API OpenAI. Ustaw OPENAI_API_KEY w zmiennych środowiskowych.');
     }
     
-    // Parsuj odpowiedź JSON
-    const result = await response.json();
-    console.log('[DEBUG] Otrzymano odpowiedź z FlowiseAI:', JSON.stringify(result).substring(0, 500) + '...');
+    // Inicjalizacja klienta OpenAI
+    const openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
+    });
     
-    return result;
+    console.log('[DEBUG] Klient OpenAI zainicjalizowany poprawnie');
+    return openai;
   } catch (error) {
-    console.error('[ERROR] Błąd podczas analizy dokumentu:', error);
+    console.error('[ERROR] Błąd podczas inicjalizacji klienta OpenAI:', error);
     throw error;
   }
 }
 
-// Nowa funkcja do przetwarzania dokumentu przez dwa API FlowiseAI
-async function processDocumentWithFlowiseAI(filePath) {
+// Funkcja do analizy obrazu z dokumentem przez GPT-4o Vision
+async function analyzeImageWithGPT4o(filePath, prompt) {
   try {
-    console.log('[DEBUG] Rozpoczynam wieloetapową analizę dokumentu');
+    console.log(`[DEBUG] Analizowanie obrazu przez GPT-4o: ${filePath}`);
     
-    // ID przepływu dla klasyfikatora dokumentów
-    const classifierFlowId = 'bc4f5360-98e2-4ce9-841d-c44812f5d850';
+    // Inicjalizacja klienta OpenAI
+    const openai = initOpenAIClient();
+    
+    // Przygotuj dane pliku
+    const fileBuffer = fs.readFileSync(filePath);
+    const base64Image = fileBuffer.toString('base64');
+    
+    // Przygotuj prompt dla różnych typów analizy
+    const systemPrompt = `Jesteś ekspertem w analizie dokumentów, specjalizującym się w ukraińskich aktach urodzenia, 
+małżeństwa i zgonu. Twoim zadaniem jest dokładna analiza obrazu dokumentu i ekstrakcja informacji.`;
+    
+    console.log(`[DEBUG] Wysyłanie obrazu do analizy przez GPT-4o z promptem: ${prompt.substring(0, 100)}...`);
+    
+    // Wywołanie API GPT-4o Vision
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o", // Używamy modelu GPT-4o
+      messages: [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/jpeg;base64,${base64Image}`,
+                detail: "high"
+              }
+            }
+          ]
+        }
+      ],
+      max_tokens: 4000
+    });
+    
+    // Pobierz i zwróć odpowiedź
+    const result = response.choices[0].message.content;
+    console.log('[DEBUG] Otrzymano odpowiedź z GPT-4o:', result.substring(0, 200) + '...');
+    
+    return result;
+  } catch (error) {
+    console.error('[ERROR] Błąd podczas analizy obrazu przez GPT-4o:', error);
+    throw error;
+  }
+}
+
+// Nowa funkcja do przetwarzania dokumentu przez GPT-4o Vision
+async function processDocumentWithGPT4o(filePath) {
+  try {
+    console.log('[DEBUG] Rozpoczynam dwuetapową analizę dokumentu z GPT-4o');
     
     // Krok 1: Najpierw analizujemy typ dokumentu
     console.log('[DEBUG] Krok 1: Klasyfikacja dokumentu');
-    const classificationResult = await sendFileToFlowiseAI(
-      filePath, 
-      classifierFlowId,
-      "Przeanalizuj ten dokument i określ jego typ"
-    );
+    const classificationPrompt = `Przeanalizuj ten dokument i określ jego typ. 
+Jest to jeden z typów dokumentów: akt urodzenia, akt małżeństwa lub akt zgonu.
+Zwróć JSON w następującym formacie:
+{
+  "akt_urodzenia": boolean,
+  "akt_malzenstwa": boolean,
+  "akt_zgonu": boolean
+}
+gdzie tylko jedno pole ma wartość true, odpowiadające typowi dokumentu.`;
+
+    const classificationResult = await analyzeImageWithGPT4o(filePath, classificationPrompt);
     
-    console.log('[DEBUG] Wynik klasyfikacji:', JSON.stringify(classificationResult).substring(0, 200));
+    console.log('[DEBUG] Wynik klasyfikacji:', classificationResult.substring(0, 200));
     
-    // Próbujemy sparsować odpowiedź JSON, jeśli jest w formacie tekstowym
+    // Próbujemy sparsować odpowiedź JSON
     let documentType = 'unknown';
     let resultObj = null;
     
     try {
-      // Próbujemy sparsować obiekt JSON z pola text
-      if (classificationResult.text) {
-        resultObj = JSON.parse(classificationResult.text);
+      // Wyciągnij JSON z odpowiedzi (może być otoczony tekstem)
+      const jsonMatch = classificationResult.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        resultObj = JSON.parse(jsonMatch[0]);
         
         // Sprawdzamy typ dokumentu na podstawie wartości true
         if (resultObj.akt_urodzenia === true) {
@@ -607,44 +608,63 @@ async function processDocumentWithFlowiseAI(filePath) {
     
     console.log(`[DEBUG] Wykryty typ dokumentu: ${documentType}`);
     
-    // Krok 2: Wybór API na podstawie typu dokumentu
+    // Krok 2: Szczegółowa analiza na podstawie typu dokumentu
     let detailedResult = null;
     
     if (documentType !== 'unknown') {
-      // Mapowanie typów dokumentów na ID przepływów 
-      const flowIdMap = {
-        'akt_urodzenia': '8ea8fdf4-a3d4-4d0a-a6bd-ee91c55ef9df',
-        'akt_malzenstwa': 'ID_DO_UZUPEŁNIENIA', // TODO: Uzupełnić prawidłowe ID
-        'akt_zgonu': 'ID_DO_UZUPEŁNIENIA'       // TODO: Uzupełnić prawidłowe ID
-      };
+      // Przygotuj prompt w zależności od typu dokumentu
+      let detailedPrompt = "";
       
-      const detailedFlowId = flowIdMap[documentType];
+      if (documentType === 'akt_urodzenia') {
+        detailedPrompt = `Przeanalizuj szczegółowo ten akt urodzenia i wyodrębnij wszystkie dane.
+Zwróć TYLKO JSON w następującym formacie (bez żadnego dodatkowego tekstu):
+{
+  "Naziwsko": "wartość",
+  "Imie": "wartość",
+  "imie ojcowskie": "wartość",
+  "roku (slownie)": "wartość",
+  "miejsce urodzenia": "wartość",
+  "Ojciec": "wartość",
+  "Obywatelstwo ojca": "wartość",
+  "Matka": "wartość",
+  "Obywatelstwo matki": "wartość",
+  "Miejsce rejestracji": "wartość",
+  "Organ państwowy wydający akt": "wartość",
+  "Data wydania": "wartość",
+  "Seria i numer dokumentu": "wartość",
+  "15. [Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:]": "wartość",
+  "16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ": "wartość",
+  "17. [Seria i numer dokumentu:] [ - zapis oryginalny] nr ": "wartość"
+}`;
+      } else if (documentType === 'akt_malzenstwa') {
+        detailedPrompt = `Przeanalizuj szczegółowo ten akt małżeństwa i wyodrębnij wszystkie dane. Zwróć JSON z wszystkimi danymi.`;
+      } else if (documentType === 'akt_zgonu') {
+        detailedPrompt = `Przeanalizuj szczegółowo ten akt zgonu i wyodrębnij wszystkie dane. Zwróć JSON z wszystkimi danymi.`;
+      }
       
-      if (detailedFlowId) {
-        console.log(`[DEBUG] Krok 2: Szczegółowa analiza dokumentu typu '${documentType}' używając flow ID: ${detailedFlowId}`);
+      console.log(`[DEBUG] Krok 2: Szczegółowa analiza dokumentu typu '${documentType}'`);
+      
+      try {
+        const rawResult = await analyzeImageWithGPT4o(filePath, detailedPrompt);
+        console.log('[DEBUG] Otrzymano szczegółową analizę dokumentu');
         
-        try {
-          detailedResult = await sendFileToFlowiseAI(
-            filePath, 
-            detailedFlowId,
-            `Przeanalizuj szczegółowo ten ${documentType} i wyodrębnij wszystkie dane`
-          );
-          
-          console.log('[DEBUG] Otrzymano szczegółową analizę dokumentu');
-        } catch (detailError) {
-          console.error('[ERROR] Błąd podczas szczegółowej analizy:', detailError);
-          // Jeśli szczegółowa analiza się nie powiedzie, zwróć tylko klasyfikację
-        }
-      } else {
-        console.log(`[WARNING] Brak skonfigurowanego FlowId dla typu dokumentu '${documentType}'`);
+        // Przygotuj format odpowiedzi zgodny z poprzednim API (FlowiseAI)
+        detailedResult = {
+          text: rawResult
+        };
+      } catch (detailError) {
+        console.error('[ERROR] Błąd podczas szczegółowej analizy:', detailError);
+        // Jeśli szczegółowa analiza się nie powiedzie, zwróć tylko klasyfikację
       }
     } else {
       console.log('[WARNING] Nie rozpoznano typu dokumentu, pomijam szczegółową analizę');
     }
     
-    // Zwróć wyniki z obu API
+    // Przygotuj wyniki w formacie zgodnym z poprzednią odpowiedzią FlowiseAI
     return {
-      api1Result: classificationResult,
+      api1Result: {
+        text: JSON.stringify(resultObj)
+      },
       api2Result: detailedResult,
       documentType: documentType
     };
@@ -654,7 +674,7 @@ async function processDocumentWithFlowiseAI(filePath) {
   }
 }
 
-// Endpoint do analizy dokumentu przez FlowiseAI
+// Endpoint do analizy dokumentu z wykorzystaniem GPT-4o Vision (zastępuje poprzednie FlowiseAI)
 app.post('/flowwise-analyze', upload.single('file'), async (req, res) => {
   try {
     // Sprawdź, czy plik został przesłany
@@ -665,18 +685,18 @@ app.post('/flowwise-analyze', upload.single('file'), async (req, res) => {
       });
     }
 
-    console.log('[INFO] Analizowanie pliku:', req.file.originalname);
+    console.log('[INFO] Analizowanie pliku z GPT-4o Vision:', req.file.originalname);
     
     try {
-      // Wywołanie wieloetapowej analizy
-      const analysisResults = await processDocumentWithFlowiseAI(req.file.path);
+      // Wywołanie wieloetapowej analizy używając GPT-4o
+      const analysisResults = await processDocumentWithGPT4o(req.file.path);
       
       // Usuń plik tymczasowy
       if (req.file && req.file.path && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
       
-      // Zwróć wyniki obu API
+      // Zwróć wyniki w tym samym formacie co poprzednie API, aby frontend działał bez zmian
       res.status(200).json({
         success: true,
         classification: analysisResults.api1Result,
@@ -689,7 +709,7 @@ app.post('/flowwise-analyze', upload.single('file'), async (req, res) => {
         }
       });
     } catch (error) {
-      console.error('[ERROR] Error during FlowiseAI analysis:', error);
+      console.error('[ERROR] Error during GPT-4o Vision analysis:', error);
       
       // Usuń plik tymczasowy nawet w przypadku błędu
       if (req.file && req.file.path && fs.existsSync(req.file.path)) {
@@ -698,7 +718,7 @@ app.post('/flowwise-analyze', upload.single('file'), async (req, res) => {
       
       res.status(500).json({
         success: false,
-        error: `Błąd analizy przez FlowiseAI: ${error.message}`
+        error: `Błąd analizy przez GPT-4o Vision: ${error.message}`
       });
     }
   } catch (error) {

@@ -1,12 +1,16 @@
-# Drive Backend
+# TLM Backend
 
-Backend API do uploadu plików na Google Drive przy użyciu konta usługi (service account). Służy jako alternatywa dla funkcji Edge, pozwalając na obejście ograniczeń związanych z autoryzacją Google Drive API w środowisku Edge Functions.
+Backend API do uploadu plików na Google Drive przy użyciu konta usługi (service account) oraz analizy dokumentów z wykorzystaniem sztucznej inteligencji. Służy jako alternatywa dla funkcji Edge, pozwalając na obejście ograniczeń związanych z autoryzacją Google Drive API w środowisku Edge Functions.
 
 ## Funkcjonalności
 
 - Upload plików na Google Drive przy użyciu konta usługi
 - Automatyczne odświeżanie tokenów bez konieczności autoryzacji użytkownika
+- Analiza dokumentów z wykorzystaniem GPT-4o Vision (OpenAI)
 - Endpoint `/upload` do przesyłania plików
+- Endpoint `/flowwise-analyze` do analizy dokumentów
+- Endpoint `/create-folder` do tworzenia folderów na Google Drive
+- Endpoint `/create-doc` do tworzenia dokumentów Google Docs
 - Endpoint `/health` do monitorowania stanu serwera
 
 ## Wymagania
@@ -15,6 +19,7 @@ Backend API do uploadu plików na Google Drive przy użyciu konta usługi (servi
 - NPM lub Yarn
 - Konto usługi Google Cloud z włączonym Google Drive API
 - Udostępniony folder Google Drive dla konta usługi
+- Klucz API OpenAI (dla funkcji analizy dokumentów)
 
 ## Instalacja i uruchomienie lokalne
 
@@ -29,6 +34,7 @@ Backend API do uploadu plików na Google Drive przy użyciu konta usługi (servi
    GDRIVE_FOLDER_ID=twoje_id_folderu_drive
    FRONTEND_URL=http://localhost:5173
    PORT=3001
+   OPENAI_API_KEY=sk-your_openai_api_key
    ```
 4. Umieść plik `service-account.json` z kluczem konta usługi Google w głównym katalogu projektu lub ustaw jego zawartość jako zmienną środowiskową `GOOGLE_SERVICE_ACCOUNT_JSON`.
 5. Uruchom serwer:
@@ -55,6 +61,7 @@ Backend API do uploadu plików na Google Drive przy użyciu konta usługi (servi
    - `GDRIVE_FOLDER_ID` - ID folderu Google Drive
    - `FRONTEND_URL` - URL Twojego frontendu (np. https://tlmmedium.vercel.app)
    - `GOOGLE_SERVICE_ACCOUNT_JSON` - Cały plik service-account.json jako string
+   - `OPENAI_API_KEY` - Klucz API OpenAI (dla analizy dokumentów)
 
 7. Kliknij "Create Web Service"
 
@@ -77,7 +84,7 @@ https://drive.google.com/drive/folders/TWOJE_ID_FOLDERU_TUTAJ
 
 ## Jak używać w aplikacji frontendowej
 
-Przykład użycia z React:
+### Przykład uploadu pliku na Google Drive
 
 ```javascript
 const uploadFileToDrive = async (file) => {
@@ -99,6 +106,35 @@ const uploadFileToDrive = async (file) => {
     }
   } catch (error) {
     console.error('Error uploading file:', error);
+    throw error;
+  }
+};
+```
+
+### Przykład analizy dokumentu z GPT-4o Vision
+
+```javascript
+const analyzeDocument = async (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const response = await fetch('https://twoj-backend-url.onrender.com/flowwise-analyze', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = await response.json();
+    if (data.success) {
+      console.log('Document analysis results:', data);
+      console.log('Document type:', data.documentType);
+      console.log('Document details:', data.details);
+      return data;
+    } else {
+      throw new Error(data.error || 'Failed to analyze document');
+    }
+  } catch (error) {
+    console.error('Error analyzing document:', error);
     throw error;
   }
 };
