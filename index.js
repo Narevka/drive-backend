@@ -508,7 +508,7 @@ function initOpenAIClient() {
 }
 
 // Funkcja do analizy obrazu z dokumentem przez GPT-4o Vision
-async function analyzeImageWithGPT4o(filePath, prompt) {
+async function analyzeImageWithGPT4o(filePath, prompt, options = {}) {
   try {
     console.log(`[DEBUG] Analizowanie obrazu przez GPT-4o: ${filePath}`);
     
@@ -525,8 +525,8 @@ małżeństwa i zgonu. Twoim zadaniem jest dokładna analiza obrazu dokumentu i 
     
     console.log(`[DEBUG] Wysyłanie obrazu do analizy przez GPT-4o z promptem: ${prompt.substring(0, 100)}...`);
     
-    // Wywołanie API GPT-4o Vision
-    const response = await openai.chat.completions.create({
+    // Bazowa konfiguracja zapytania
+    const requestConfig = {
       model: "gpt-4o", // Używamy modelu GPT-4o
       messages: [
         { role: "system", content: systemPrompt },
@@ -545,11 +545,33 @@ małżeństwa i zgonu. Twoim zadaniem jest dokładna analiza obrazu dokumentu i 
         }
       ],
       max_tokens: 4000
-    });
+    };
+    
+    // Jeśli mamy zdefiniowaną funkcję, użyj Function Calling
+    if (options.functionDefinition) {
+      requestConfig.functions = [options.functionDefinition];
+      requestConfig.function_call = { name: options.functionDefinition.name };
+    } 
+    // W przeciwnym razie, jeśli potrzebujemy JSON, użyj response_format
+    else if (options.requireJson) {
+      requestConfig.response_format = { type: "json_object" };
+    }
+    
+    // Wywołanie API GPT-4o Vision
+    const response = await openai.chat.completions.create(requestConfig);
     
     // Pobierz i zwróć odpowiedź
-    const result = response.choices[0].message.content;
-    console.log('[DEBUG] Otrzymano odpowiedź z GPT-4o:', result.substring(0, 200) + '...');
+    let result;
+    
+    if (options.functionDefinition) {
+      // Jeśli używamy funkcji, zwróć argumenty funkcji
+      result = response.choices[0].message.function_call.arguments;
+      console.log('[DEBUG] Otrzymano odpowiedź z function call:', result.substring(0, 200) + '...');
+    } else {
+      // W przeciwnym razie zwróć zwykłą odpowiedź
+      result = response.choices[0].message.content;
+      console.log('[DEBUG] Otrzymano odpowiedź z GPT-4o:', result.substring(0, 200) + '...');
+    }
     
     return result;
   } catch (error) {
@@ -563,46 +585,62 @@ async function processDocumentWithGPT4o(filePath) {
   try {
     console.log('[DEBUG] Rozpoczynam dwuetapową analizę dokumentu z GPT-4o');
     
-    // Krok 1: Najpierw analizujemy typ dokumentu
+    // Krok 1: Najpierw analizujemy typ dokumentu z wymuszeniem formatu JSON
     console.log('[DEBUG] Krok 1: Klasyfikacja dokumentu');
     const classificationPrompt = `Przeanalizuj ten dokument i określ jego typ. 
-Jest to jeden z typów dokumentów: akt urodzenia, akt małżeństwa lub akt zgonu.
-Zwróć JSON w następującym formacie:
-{
-  "akt_urodzenia": boolean,
-  "akt_malzenstwa": boolean,
-  "akt_zgonu": boolean
-}
-gdzie tylko jedno pole ma wartość true, odpowiadające typowi dokumentu.`;
+Jest to jeden z typów dokumentów: akt urodzenia, akt małżeństwa lub akt zgonu.`;
 
-    const classificationResult = await analyzeImageWithGPT4o(filePath, classificationPrompt);
+    // Definiujemy funkcję dla klasyfikacji dokumentu
+    const classificationFunction = {
+      name: "classify_document",
+      description: "Klasyfikuje dokument do jednej z kategorii: akt urodzenia, akt małżeństwa lub akt zgonu",
+      parameters: {
+        type: "object",
+        properties: {
+          akt_urodzenia: {
+            type: "boolean",
+            description: "Czy dokument to akt urodzenia"
+          },
+          akt_malzenstwa: {
+            type: "boolean",
+            description: "Czy dokument to akt małżeństwa"
+          },
+          akt_zgonu: {
+            type: "boolean",
+            description: "Czy dokument to akt zgonu"
+          }
+        },
+        required: ["akt_urodzenia", "akt_malzenstwa", "akt_zgonu"]
+      }
+    };
+
+    const classificationResult = await analyzeImageWithGPT4o(
+      filePath, 
+      classificationPrompt,
+      { functionDefinition: classificationFunction }
+    );
     
-    console.log('[DEBUG] Wynik klasyfikacji:', classificationResult.substring(0, 200));
+    console.log('[DEBUG] Wynik klasyfikacji:', classificationResult);
     
-    // Próbujemy sparsować odpowiedź JSON
+    // Parsujemy wynik - powinien to być już czysty JSON
     let documentType = 'unknown';
     let resultObj = null;
     
     try {
-      // Wyciągnij JSON z odpowiedzi (może być otoczony tekstem)
-      const jsonMatch = classificationResult.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        resultObj = JSON.parse(jsonMatch[0]);
-        
-        // Sprawdzamy typ dokumentu na podstawie wartości true
-        if (resultObj.akt_urodzenia === true) {
-          documentType = 'akt_urodzenia';
-        } else if (resultObj.akt_malzenstwa === true) {
-          documentType = 'akt_malzenstwa';
-        } else if (resultObj.akt_zgonu === true) {
-          documentType = 'akt_zgonu';
-        } else {
-          documentType = 'unknown';
-        }
+      resultObj = JSON.parse(classificationResult);
+      
+      // Sprawdzamy typ dokumentu na podstawie wartości true
+      if (resultObj.akt_urodzenia === true) {
+        documentType = 'akt_urodzenia';
+      } else if (resultObj.akt_malzenstwa === true) {
+        documentType = 'akt_malzenstwa';
+      } else if (resultObj.akt_zgonu === true) {
+        documentType = 'akt_zgonu';
+      } else {
+        documentType = 'unknown';
       }
     } catch (parseError) {
       console.error('[ERROR] Nie udało się sparsować odpowiedzi JSON:', parseError);
-      // Jeśli parsowanie się nie uda, ustawiamy typ dokumentu na unknown
       documentType = 'unknown';
     }
     
@@ -612,55 +650,120 @@ gdzie tylko jedno pole ma wartość true, odpowiadające typowi dokumentu.`;
     let detailedResult = null;
     
     if (documentType !== 'unknown') {
-      // Przygotuj prompt w zależności od typu dokumentu
+      // Funkcje i prompty w zależności od typu dokumentu
       let detailedPrompt = "";
+      let functionDefinition = null;
       
       if (documentType === 'akt_urodzenia') {
-        detailedPrompt = `Przeanalizuj szczegółowo ten akt urodzenia i wyodrębnij wszystkie dane.
-Zwróć TYLKO JSON w następującym formacie (bez żadnego dodatkowego tekstu):
-{
-  "Naziwsko": "wartość",
-  "Imie": "wartość",
-  "imie ojcowskie": "wartość",
-  "roku (slownie)": "wartość",
-  "miejsce urodzenia": "wartość",
-  "Ojciec": "wartość",
-  "Obywatelstwo ojca": "wartość",
-  "Matka": "wartość",
-  "Obywatelstwo matki": "wartość",
-  "Miejsce rejestracji": "wartość",
-  "Organ państwowy wydający akt": "wartość",
-  "Data wydania": "wartość",
-  "Seria i numer dokumentu": "wartość",
-  "15. [Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:]": "wartość",
-  "16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ": "wartość",
-  "17. [Seria i numer dokumentu:] [ - zapis oryginalny] nr ": "wartość"
-}`;
+        detailedPrompt = `Przeanalizuj szczegółowo ten akt urodzenia i wyodrębnij wszystkie dane.`;
+        
+        functionDefinition = {
+          name: "extract_birth_certificate_data",
+          description: "Wyciąga informacje z aktu urodzenia",
+          parameters: {
+            type: "object",
+            properties: {
+              "Naziwsko": {
+                type: "string",
+                description: "Nazwisko osoby której dotyczy cały dokument"
+              },
+              "Imie": {
+                type: "string",
+                description: "Imię osoby której dotyczy cały dokument"
+              },
+              "imie ojcowskie": {
+                type: "string",
+                description: "imię ojcowskie osoby"
+              },
+              "roku (slownie)": {
+                type: "string",
+                description: "Rok urodzenia słownie"
+              },
+              "miejsce urodzenia": {
+                type: "string",
+                description: "Miejsce urodzenia osoby"
+              },
+              "Ojciec": {
+                type: "string",
+                description: "Imię i nazwisko ojca"
+              },
+              "Obywatelstwo ojca": {
+                type: "string",
+                description: "Obywatelstwo ojca"
+              },
+              "Matka": {
+                type: "string",
+                description: "Imię i nazwisko matki"
+              },
+              "Obywatelstwo matki": {
+                type: "string",
+                description: "Obywatelstwo matki"
+              },
+              "Miejsce rejestracji": {
+                type: "string",
+                description: "Miejsce rejestracji aktu"
+              },
+              "Organ państwowy wydający akt": {
+                type: "string",
+                description: "Nazwa organu, który wydał akt"
+              },
+              "Data wydania": {
+                type: "string",
+                description: "Data wydania aktu"
+              },
+              "Seria i numer dokumentu": {
+                type: "string",
+                description: "Seria i numer dokumentu"
+              },
+              "15. [Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:]": {
+                type: "string",
+                description: "Treść pieczęci"
+              },
+              "16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ": {
+                type: "string",
+                description: "Podpis kierownika USC"
+              },
+              "17. [Seria i numer dokumentu:] [ - zapis oryginalny] nr ": {
+                type: "string",
+                description: "Szczegółowe informacje o serii i numerze dokumentu"
+              }
+            },
+            required: ["Naziwsko", "Imie"]
+          }
+        };
       } else if (documentType === 'akt_malzenstwa') {
-        detailedPrompt = `Przeanalizuj szczegółowo ten akt małżeństwa i wyodrębnij wszystkie dane. Zwróć JSON z wszystkimi danymi.`;
+        detailedPrompt = `Przeanalizuj szczegółowo ten akt małżeństwa i wyodrębnij wszystkie dane.`;
+        // Tutaj możesz zdefiniować funkcję dla aktu małżeństwa
+        // podobnie jak dla aktu urodzenia, z odpowiednimi polami
       } else if (documentType === 'akt_zgonu') {
-        detailedPrompt = `Przeanalizuj szczegółowo ten akt zgonu i wyodrębnij wszystkie dane. Zwróć JSON z wszystkimi danymi.`;
+        detailedPrompt = `Przeanalizuj szczegółowo ten akt zgonu i wyodrębnij wszystkie dane.`;
+        // Tutaj możesz zdefiniować funkcję dla aktu zgonu
+        // podobnie jak dla aktu urodzenia, z odpowiednimi polami
       }
       
       console.log(`[DEBUG] Krok 2: Szczegółowa analiza dokumentu typu '${documentType}'`);
       
       try {
-        const rawResult = await analyzeImageWithGPT4o(filePath, detailedPrompt);
+        const rawResult = await analyzeImageWithGPT4o(
+          filePath, 
+          detailedPrompt,
+          { functionDefinition: functionDefinition }
+        );
+        
         console.log('[DEBUG] Otrzymano szczegółową analizę dokumentu');
         
-        // Przygotuj format odpowiedzi zgodny z poprzednim API (FlowiseAI)
+        // Przygotuj format odpowiedzi zgodny z poprzednim API
         detailedResult = {
-          text: rawResult
+          text: rawResult  // Powinien być już czystym JSON
         };
       } catch (detailError) {
         console.error('[ERROR] Błąd podczas szczegółowej analizy:', detailError);
-        // Jeśli szczegółowa analiza się nie powiedzie, zwróć tylko klasyfikację
       }
     } else {
       console.log('[WARNING] Nie rozpoznano typu dokumentu, pomijam szczegółową analizę');
     }
     
-    // Przygotuj wyniki w formacie zgodnym z poprzednią odpowiedzią FlowiseAI
+    // Przygotuj wyniki w formacie zgodnym z poprzednim
     return {
       api1Result: {
         text: JSON.stringify(resultObj)
