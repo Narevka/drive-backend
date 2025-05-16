@@ -483,6 +483,20 @@ try {
   console.error('Could not create uploads directory:', err);
 }
 
+// Import LangSmith
+let wrapOpenAI, traceable;
+try {
+  const langsmith = require('langsmith');
+  wrapOpenAI = langsmith.wrappers.wrap_openai;
+  traceable = langsmith.traceable;
+  console.log('[DEBUG] Pakiet LangSmith załadowany pomyślnie');
+} catch (error) {
+  console.warn('[WARN] Pakiet LangSmith nie jest zainstalowany, monitorowanie będzie wyłączone:', error.message);
+  // Utworzenie pustych funkcji w przypadku braku pakietu
+  wrapOpenAI = (client) => client;
+  traceable = (fn) => fn;
+}
+
 // Inicjalizacja klienta OpenAI
 function initOpenAIClient() {
   try {
@@ -499,8 +513,22 @@ function initOpenAIClient() {
       apiKey: process.env.OPENAI_API_KEY
     });
     
+    // Sprawdź, czy istnieje klucz API LangSmith
+    let tracedOpenAI = openai;
+    if (process.env.LANGSMITH_API_KEY) {
+      try {
+        console.log('[DEBUG] Integracja z LangSmith aktywna');
+        tracedOpenAI = wrapOpenAI(openai);
+      } catch (langsmithError) {
+        console.error('[ERROR] Błąd podczas inicjalizacji LangSmith:', langsmithError);
+        console.warn('[WARN] Kontynuowanie bez monitorowania LangSmith');
+      }
+    } else {
+      console.log('[INFO] Klucz API LangSmith nie został skonfigurowany. Monitorowanie wyłączone.');
+    }
+    
     console.log('[DEBUG] Klient OpenAI zainicjalizowany poprawnie');
-    return openai;
+    return tracedOpenAI;
   } catch (error) {
     console.error('[ERROR] Błąd podczas inicjalizacji klienta OpenAI:', error);
     throw error;
@@ -881,30 +909,30 @@ async function createDocxTranslation(docData, outputPath) {
 
     // Dodaj dane osobowe
     paragraphs.push(createParagraph(`Nazwisko: ${docData["Naziwsko"] || '-/-'}`));
-    paragraphs.push(createParagraph(`Imię: ${docData["3. Imie"] || '-/-'}`));
-    paragraphs.push(createParagraph(`Imię odojcowskie: ${docData["4. imie ojcowskie"] || '-/-'}`));
-    paragraphs.push(createParagraph(`roku (słownie: ) ${docData["5. roku (slownie)"] || '-/-'}`));
-    paragraphs.push(createParagraph(`miejsce urodzenia: Ukraina, obwód zaporoski, ${docData["6. miejsce urodzenia: Ukraina, obwód zaporoski,  "] || '-/-'}`));
-    paragraphs.push(createParagraph(`o czym w Księdze Rejestracji Urodzeń w dniu roku dokonano odpowiedniego wpisu do akt pod nr ${docData["7. o czym w Księdze Rejestracji Urodzeń w dniu  roku dokonano odpowiedniego wpisu do akt pod nr  "] || '-/-'}`));
+    paragraphs.push(createParagraph(`Imię: ${docData["Imie"] || '-/-'}`));
+    paragraphs.push(createParagraph(`Imię odojcowskie: ${docData["imie ojcowskie"] || '-/-'}`));
+    paragraphs.push(createParagraph(`roku (słownie: ) ${docData["roku (slownie)"] || '-/-'}`));
+    paragraphs.push(createParagraph(`miejsce urodzenia: Ukraina, obwód zaporoski, ${docData["miejsce urodzenia"] || '-/-'}`));
+    paragraphs.push(createParagraph(`o czym w Księdze Rejestracji Urodzeń w dniu roku dokonano odpowiedniego wpisu do akt pod nr ${docData["Numer wpisu"] || '-/-'}`));
 
     // Dodaj nagłówek RODZICE
     paragraphs.push(createParagraph("RODZICE", 
       { bold: true, alignment: AlignmentType.CENTER, spacingBefore: 400, spacingAfter: 400 }));
 
     // Dodaj dane rodziców
-    paragraphs.push(createParagraph(`Ojciec: , syn ${docData["8. Ojciec: , syn  "] || '-/-'}`));
-    paragraphs.push(createParagraph(`Obywatelstwo: ${docData["9. Obywatelstwo"] || '-/-'}`));
-    paragraphs.push(createParagraph(`Matka: , córka ${docData["10. Matka: , córka "] || '-/-'}`));
-    paragraphs.push(createParagraph(`Obywatelstwo: ${docData["11. Obywatelstwo:  "] || '-/-'}`));
+    paragraphs.push(createParagraph(`Ojciec: ${docData["Ojciec"] || '-/-'}`));
+    paragraphs.push(createParagraph(`Obywatelstwo: ${docData["Obywatelstwo ojca"] || '-/-'}`));
+    paragraphs.push(createParagraph(`Matka: ${docData["Matka"] || '-/-'}`));
+    paragraphs.push(createParagraph(`Obywatelstwo: ${docData["Obywatelstwo matki"] || '-/-'}`));
 
     // Dodaj pozostałe informacje
-    paragraphs.push(createParagraph(`Miejsce rejestracji: (nazwa i siedziba państwowego USC) ${docData["12. Miejsce rejestracji: (nazwa i siedziba państwowego USC)  "] || '-/-'}`));
-    paragraphs.push(createParagraph(`Organ państwowy wydający akt: (nazwa i siedziba państwowego USC) ${docData["13. Organ państwowy wydający akt: (nazwa i siedziba państwowego USC)  "] || '-/-'}`));
-    paragraphs.push(createParagraph(`Data wydania: roku. ${docData["14. Data wydania:  roku. "] || '-/-'}`));
+    paragraphs.push(createParagraph(`Miejsce rejestracji: (nazwa i siedziba państwowego USC) ${docData["Miejsce rejestracji"] || '-/-'}`));
+    paragraphs.push(createParagraph(`Organ państwowy wydający akt: (nazwa i siedziba państwowego USC) ${docData["Organ państwowy wydający akt"] || '-/-'}`));
+    paragraphs.push(createParagraph(`Data wydania: ${docData["Data wydania"] || '-/-'}`));
     paragraphs.push(createParagraph(`[Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:] ${docData["15. [Odcisk okrągłej pieczęci z godłem Ukrainy w środku i następującym napisem w otoku:]"] || '-/-'}`, 
       { italics: true }));
-    paragraphs.push(createParagraph(`Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ${docData["16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony]  "] || '-/-'}`));
-    paragraphs.push(createParagraph(`[Seria i numer dokumentu:] [ - zapis oryginalny] nr ${docData["17. [Seria i numer dokumentu:]  [  - zapis oryginalny] nr  "] || '-/-'}`, 
+    paragraphs.push(createParagraph(`Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] ${docData["16. Kierownik Urzędu Rejestracji Aktów Stanu Cywilnego [podpis skrócony] "] || docData["Kierownik USC"] || '-/-'}`));
+    paragraphs.push(createParagraph(`[Seria i numer dokumentu:] [ - zapis oryginalny] nr ${docData["Seria i numer dokumentu"] || '-/-'}`, 
       { italics: true }));
 
     // Dodaj linię rozdzielającą
