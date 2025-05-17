@@ -483,18 +483,51 @@ try {
   console.error('Could not create uploads directory:', err);
 }
 
-// Import LangSmith
-let wrapOpenAI, traceable;
+// Import i konfiguracja LangSmith
+let wrapOpenAI, Client, traceable, RunTree;
 try {
   const langsmith = require('langsmith');
   wrapOpenAI = langsmith.wrappers.wrap_openai;
   traceable = langsmith.traceable;
-  console.log('[DEBUG] Pakiet LangSmith załadowany pomyślnie');
+  Client = langsmith.Client;
+  RunTree = langsmith.RunTree;
+  
+  // Sprawdź i skonfiguruj zmienne środowiskowe LangSmith jeśli są dostępne
+  if (process.env.LANGSMITH_API_KEY) {
+    // Ustaw domyślny projekt, jeśli nie jest ustawiony
+    if (!process.env.LANGSMITH_PROJECT) {
+      process.env.LANGSMITH_PROJECT = "tlm-document-analyzer";
+      console.log('[INFO] Ustawiono domyślny projekt LangSmith:', process.env.LANGSMITH_PROJECT);
+    }
+    
+    // Włącz śledzenie, jeśli nie jest ustawione
+    if (!process.env.LANGSMITH_TRACING) {
+      process.env.LANGSMITH_TRACING = "true";
+      console.log('[INFO] Włączono śledzenie LangSmith');
+    }
+    
+    console.log('[DEBUG] Pakiet LangSmith załadowany pomyślnie');
+    console.log('[INFO] Konfiguracja LangSmith:');
+    console.log(`  - LANGSMITH_PROJECT: ${process.env.LANGSMITH_PROJECT}`);
+    console.log(`  - LANGSMITH_TRACING: ${process.env.LANGSMITH_TRACING}`);
+    console.log(`  - LANGSMITH_ENDPOINT: ${process.env.LANGSMITH_ENDPOINT || 'https://api.smith.langchain.com'}`);
+  } else {
+    console.log('[INFO] Brak klucza API LangSmith, monitorowanie zostanie wyłączone');
+  }
 } catch (error) {
   console.warn('[WARN] Pakiet LangSmith nie jest zainstalowany, monitorowanie będzie wyłączone:', error.message);
   // Utworzenie pustych funkcji w przypadku braku pakietu
   wrapOpenAI = (client) => client;
   traceable = (fn) => fn;
+  Client = class MockClient {
+    constructor() {}
+    async createRun() { return {}; }
+    async updateRun() { return {}; }
+  };
+  RunTree = class MockRunTree {
+    constructor() {}
+    async end() {}
+  };
 }
 
 // Inicjalizacja klienta OpenAI
